@@ -31,7 +31,7 @@
 ## 3. 웹 배포 (Vercel, 무료)
 1. https://vercel.com/new → GitHub 저장소 Import
 2. Root Directory 는 그대로 두어도 됩니다 — 루트의 `vercel.json` 이 `web/` 을 빌드합니다 (직접 `web` 으로 바꿔도 동작).
-3. Environment Variables 에 `web\.env.local` 의 5개 (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_VAPID_PUBLIC_KEY`, `VITE_LOGIN_EMAIL`, `VITE_LOGIN_PASSWORD`) 입력
+3. 환경 변수는 저장소의 `web/.env.production` 이 빌드에 쓰이므로 대시보드 입력이 필요 없습니다 (대시보드에 넣으면 그쪽이 우선).
 4. Deploy → 나온 주소(예: `https://shopping-helper.vercel.app`)를
    - Supabase → Authentication → URL Configuration → Site URL / Redirect URLs 에 추가 (이메일 로그인 링크용)
    - Chrome 확장 옵션의 "앱 주소"에 입력
