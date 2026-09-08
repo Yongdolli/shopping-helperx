@@ -13,11 +13,11 @@
 
 ## 2단계 — 배포·자동 수집
 
-- [ ] `push-to-github.cmd` (저장소 URL 입력) → GitHub → Settings → Secrets 에 `GITHUB.md` 표대로 등록 (최소 SUPABASE_URL, SUPABASE_SERVICE_KEY, VAPID_*)
+- [x] `push-to-github.cmd` → https://github.com/Yongdolli/shopping-helperx (2026-09-08) → GitHub → Settings → Secrets 에 `GITHUB.md` 표대로 등록 (최소 SUPABASE_URL, SUPABASE_SERVICE_KEY, VAPID_*)
 - [ ] Actions 탭 → `collect-prices` → Run workflow 수동 1회 → 로그에서 에러 없는지 확인 (이후 매시 17분 자동)
 - [ ] Actions 탭 → `daily-digest` → Run workflow 수동 1회 → 대기 알림이 있으면 "🌅/☀️/🌙 알림 N건" 도착 확인 (이후 08:00·12:30·19:00 KST 자동). 로컬: `python -m worker digest --dry-run`
 - [ ] Actions 탭 → `weekly-report` → Run workflow 수동 1회 → 텔레그램/이메일에 "📋 주간 요약" 도착 확인 (이후 월요일 09:00 KST 자동). 로컬 미리보기: `python -m worker report --dry-run`
-- [ ] **Vercel** Import → Root Directory `web` → env 5개(`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_VAPID_PUBLIC_KEY`, `VITE_LOGIN_EMAIL`, `VITE_LOGIN_PASSWORD`) → 배포
+- [x] **Vercel** https://shopping-helperx.vercel.app — Import → Root Directory `web` → env 5개(`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_VAPID_PUBLIC_KEY`, `VITE_LOGIN_EMAIL`, `VITE_LOGIN_PASSWORD`) → 배포
 - [ ] Supabase → Auth → URL Configuration → Site URL / Redirect 에 Vercel 주소
 - [ ] 폰: 배포 주소 접속 → 홈 화면에 추가 → 설정에서 웹푸시 "켜기" → 쇼핑 앱에서 "공유 → Shopping Helper" 되는지
 - [ ] PC: `node extension/build.mjs` → chrome://extensions 개발자 모드 → `extension/` 로드 → 옵션에 배포 주소
