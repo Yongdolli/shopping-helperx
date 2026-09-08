@@ -1,4 +1,4 @@
-"""CLI: python -m worker <run|demo|add|list|vapid|doctor|report|digest>"""
+"""CLI: python -m worker <run|demo|add|list|vapid|doctor|report|digest|user>"""
 from __future__ import annotations
 
 import argparse
@@ -73,6 +73,24 @@ def cmd_list(store) -> None:
         print(f"{p.id[:8]}  {p.site:<10} {last:>16}  {p.title[:40]}{' · ' + p.variant if p.variant else ''}{flag}{err}")
 
 
+def cmd_user(email: str, password: str) -> None:
+    """자동 로그인용 계정 생성/비밀번호 갱신 (Supabase Auth admin API, 이메일 확인 완료 상태). 웹 .env.local 의 VITE_LOGIN_EMAIL/PASSWORD 와 짝."""
+    from .config import settings
+    if not settings.use_supabase:
+        print("SUPABASE_URL / SUPABASE_SERVICE_KEY 가 필요합니다 (worker/.env)")
+        return
+    from supabase import create_client
+    admin = create_client(settings.supabase_url, settings.supabase_key).auth.admin
+    existing = next((u for u in admin.list_users() if (u.email or "").lower() == email.lower()), None)
+    if existing:
+        admin.update_user_by_id(existing.id, {"password": password, "email_confirm": True})
+        print(f"갱신됨: {email} ({existing.id})")
+    else:
+        u = admin.create_user({"email": email, "password": password, "email_confirm": True})
+        print(f"생성됨: {email} ({u.user.id})")
+    print("웹 자동 로그인: web/.env.local 에 VITE_LOGIN_EMAIL / VITE_LOGIN_PASSWORD 를 같은 값으로 넣으세요 (Vercel 환경 변수에도).")
+
+
 def cmd_vapid() -> None:
     from .push import generate_vapid_keys
 
@@ -99,6 +117,9 @@ def main() -> None:
     r.add_argument("--dry-run", action="store_true", help="발송하지 않고 출력만")
     d = sub.add_parser("digest", help="대기 중 알림을 모아 발송 (아침·점심·저녁 크론)")
     d.add_argument("--dry-run", action="store_true", help="발송·처리하지 않고 출력만")
+    u = sub.add_parser("user", help="자동 로그인용 계정 생성/비밀번호 갱신 (Supabase)")
+    u.add_argument("email")
+    u.add_argument("password")
     args = ap.parse_args()
 
     if args.cmd == "vapid":
@@ -107,6 +128,9 @@ def main() -> None:
     if args.cmd == "doctor":
         from .doctor import run_doctor
         raise SystemExit(run_doctor())
+    if args.cmd == "user":
+        cmd_user(args.email, args.password)
+        return
     store = get_storage()
     if args.cmd == "run":
         run_once(store)

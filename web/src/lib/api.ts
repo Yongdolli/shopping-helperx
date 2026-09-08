@@ -44,6 +44,7 @@ export interface Api {
   sharedView(token: string, rates: Rates): Promise<{ share: ShareLink; products: ProductOverview[] } | null>;
   currentUserEmail(): Promise<string | null>;
   signIn(email: string): Promise<void>;
+  signInWithPassword(email: string, password: string): Promise<void>;
   signOut(): Promise<void>;
 }
 
@@ -213,6 +214,7 @@ class DemoApi implements Api {
   }
   async currentUserEmail() { return "demo@local"; }
   async signIn() { /* no-op */ }
+  async signInWithPassword() { /* no-op */ }
   async signOut() { /* no-op */ }
 }
 
@@ -355,6 +357,10 @@ class SupabaseApi implements Api {
     const { error } = await this.sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin } });
     if (error) throw error;
   }
+  async signInWithPassword(email: string, password: string) {
+    const { error } = await this.sb.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+  }
   async signOut() { await this.sb.auth.signOut(); }
 }
 
@@ -363,3 +369,5 @@ const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 export const supabase = url && key ? createClient(url, key) : null;
 export const api: Api = supabase ? new SupabaseApi(supabase) : new DemoApi();
 export const VAPID_PUBLIC_KEY = (import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined) ?? "";
+/** 개인용 자동 로그인 — `python -m worker user <email> <pw>` 로 만든 계정. 둘 다 있으면 앱이 열릴 때 스스로 로그인한다 (입력 화면 없음). */
+export const AUTO_LOGIN = { email: (import.meta.env.VITE_LOGIN_EMAIL as string | undefined) ?? "", password: (import.meta.env.VITE_LOGIN_PASSWORD as string | undefined) ?? "" };

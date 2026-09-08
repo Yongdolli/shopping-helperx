@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { api } from "../lib/api";
 
-export default function Login() {
+/** 자동 로그인(VITE_LOGIN_EMAIL/PASSWORD)이 없거나 실패했을 때만 보이는 예비 화면 */
+export default function Login({ autoError }: { autoError?: string | null }) {
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -15,6 +16,7 @@ export default function Login() {
     <div className="min-h-full flex items-center justify-center p-6">
       <form onSubmit={submit} className="card w-full max-w-sm p-6 space-y-4">
         <div className="flex items-center gap-2"><img src="/icon.svg" className="h-9 w-9" alt="" /><span className="text-lg font-bold">Shopping Helper</span></div>
+        {autoError && <div className="text-sm text-rose-600">자동 로그인 실패: {autoError}<div className="text-xs text-slate-500 mt-1">worker 에서 <code>python -m worker user &lt;email&gt; &lt;비밀번호&gt;</code> 로 계정을 만들고 web/.env.local 의 VITE_LOGIN_* 과 맞추세요.</div></div>}
         <p className="text-sm text-slate-500">이메일로 로그인 링크를 보내드립니다.</p>
         {sent ? (
           <div className="text-sm text-emerald-600">메일함을 확인하세요. 링크를 누르면 로그인됩니다.</div>

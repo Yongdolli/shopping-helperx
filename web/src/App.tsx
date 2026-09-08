@@ -10,16 +10,24 @@ import Login from "./pages/Login";
 import Capture from "./pages/Capture";
 import Share from "./pages/Share";
 import SharedView from "./pages/SharedView";
-import { api, supabase } from "./lib/api";
+import { AUTO_LOGIN, api, supabase } from "./lib/api";
 import { useStore } from "./store";
 
 export default function App() {
   const refresh = useStore((s) => s.refresh);
   const [authed, setAuthed] = useState<boolean | null>(api.mode === "demo" ? true : null);
+  const [autoErr, setAutoErr] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supabase) return;
-    supabase.auth.getSession().then(({ data }) => setAuthed(!!data.session));
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (data.session) { setAuthed(true); return; }
+      if (AUTO_LOGIN.email && AUTO_LOGIN.password) {   // 개인용: 세션이 없으면 내장 계정으로 자동 로그인
+        try { await api.signInWithPassword(AUTO_LOGIN.email, AUTO_LOGIN.password); return; }
+        catch (e) { setAutoErr((e as Error).message); }
+      }
+      setAuthed(false);
+    });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => setAuthed(!!session));
     return () => sub.subscription.unsubscribe();
   }, []);
@@ -31,7 +39,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="s/:token" element={<SharedView />} />
-        <Route element={authed === null ? null : authed ? <Outlet /> : <Login />}>
+        <Route element={authed === null ? null : authed ? <Outlet /> : <Login autoError={autoErr} />}>
         <Route element={<Layout />}>
           <Route index element={<Dashboard />} />
           <Route path="p/:id" element={<ProductDetail />} />

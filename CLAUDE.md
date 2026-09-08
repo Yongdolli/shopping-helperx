@@ -106,6 +106,7 @@ node extension/build.mjs                    # content.js 재생성 → chrome://
 ## 환경 변수 (`.env.example` 참고)
 
 - `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` (워커) / `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (웹) — 없으면 각각 SQLite / 데모 모드
+- `VITE_LOGIN_EMAIL`, `VITE_LOGIN_PASSWORD` (웹, 개인용 자동 로그인) — 있으면 세션 없을 때 `signInWithPassword` 로 스스로 로그인, 이메일 입력 화면은 실패 시에만. 계정은 `python -m worker user <email> <pw>` (admin API, 이메일 확인 완료).
 - 웹푸시: `VITE_VAPID_PUBLIC_KEY` (웹), `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (워커)
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` / `SMTP_*`, `ALERT_EMAIL_TO`
 - 사이트 API 키(전부 무료): `COUPANG_ACCESS_KEY/SECRET_KEY`, `EBAY_CLIENT_ID/SECRET`, `BESTBUY_API_KEY`, `ELEVENST_API_KEY`, `ALIEXPRESS_APP_KEY/SECRET`

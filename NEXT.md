@@ -8,7 +8,8 @@
 - [x] **Supabase** 프로젝트 생성 → SQL Editor 에 `supabase/ALL_MIGRATIONS.sql`(001~009 합본) 전체를 붙여넣고 Run (또는 개별 파일을 번호 순서대로) → Auth → Email(매직링크) 켜기
 - [x] 폴더의 `setup-env.cmd` 실행 → `web/.env.local`, `worker/.env` 생성됨 → **[필수]** Supabase URL / anon key / service key 붙여넣기 (웹푸시 키는 이미 들어 있음)
 - [x] `cd worker && pip install -r requirements.txt && python -m worker doctor` → 초록 항목 확인
-- [ ] `cd web && npm install && npm run dev` → 로그인(매직링크) → 상품 1개 등록 → 데모 모드가 아닌지 확인
+- [x] 자동 로그인 계정 생성 (`python -m worker user …`, 2026-09-08) — 이메일 입력 없이 앱이 열리면 로그인됨
+- [ ] `cd web && npm run dev` → 자동 로그인 → 상품 1개 등록 → 데모 모드가 아닌지 확인
 
 ## 2단계 — 배포·자동 수집
 
@@ -16,7 +17,7 @@
 - [ ] Actions 탭 → `collect-prices` → Run workflow 수동 1회 → 로그에서 에러 없는지 확인 (이후 매시 17분 자동)
 - [ ] Actions 탭 → `daily-digest` → Run workflow 수동 1회 → 대기 알림이 있으면 "🌅/☀️/🌙 알림 N건" 도착 확인 (이후 08:00·12:30·19:00 KST 자동). 로컬: `python -m worker digest --dry-run`
 - [ ] Actions 탭 → `weekly-report` → Run workflow 수동 1회 → 텔레그램/이메일에 "📋 주간 요약" 도착 확인 (이후 월요일 09:00 KST 자동). 로컬 미리보기: `python -m worker report --dry-run`
-- [ ] **Vercel** Import → Root Directory `web` → env 3개(`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_VAPID_PUBLIC_KEY`) → 배포
+- [ ] **Vercel** Import → Root Directory `web` → env 5개(`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_VAPID_PUBLIC_KEY`, `VITE_LOGIN_EMAIL`, `VITE_LOGIN_PASSWORD`) → 배포
 - [ ] Supabase → Auth → URL Configuration → Site URL / Redirect 에 Vercel 주소
 - [ ] 폰: 배포 주소 접속 → 홈 화면에 추가 → 설정에서 웹푸시 "켜기" → 쇼핑 앱에서 "공유 → Shopping Helper" 되는지
 - [ ] PC: `node extension/build.mjs` → chrome://extensions 개발자 모드 → `extension/` 로드 → 옵션에 배포 주소

@@ -36,8 +36,8 @@ if errorlevel 1 (
 )
 echo.
 echo [OK] 올라갔습니다. 다음 단계:
-echo   1. GitHub 저장소 -> Settings -> Secrets and variables -> Actions -> New repository secret
+echo   1. GitHub 저장소 → Settings → Secrets and variables → Actions → New repository secret
 echo      GITHUB.md 의 목록대로 등록 (worker\.env 값을 그대로 복사)
-echo   2. Actions 탭 -> collect-prices, daily-digest, weekly-report -> Run workflow 로 각각 1회 수동 실행해 성공 확인
-echo   3. https://vercel.com/new 에서 이 저장소 Import -> Root Directory = web -> 환경 변수 3개 입력 -> Deploy
+echo   2. Actions 탭 → collect-prices, daily-digest, weekly-report → Run workflow 로 각각 1회 수동 실행해 성공 확인
+echo   3. https://vercel.com/new 에서 이 저장소 Import → Root Directory = web → 환경 변수 3개 입력 → Deploy
 pause

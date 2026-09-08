@@ -31,7 +31,7 @@
 ## 3. 웹 배포 (Vercel, 무료)
 1. https://vercel.com/new → GitHub 저장소 Import
 2. **Root Directory: `web`** (중요) · Framework: Vite · Build `npm run build` · Output `dist`
-3. Environment Variables 에 `web\.env.local` 의 3개 (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_VAPID_PUBLIC_KEY`) 입력
+3. Environment Variables 에 `web\.env.local` 의 5개 (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_VAPID_PUBLIC_KEY`, `VITE_LOGIN_EMAIL`, `VITE_LOGIN_PASSWORD`) 입력
 4. Deploy → 나온 주소(예: `https://shopping-helper.vercel.app`)를
    - Supabase → Authentication → URL Configuration → Site URL / Redirect URLs 에 추가 (이메일 로그인 링크용)
    - Chrome 확장 옵션의 "앱 주소"에 입력
