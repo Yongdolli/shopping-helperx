@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+.env.local
+__pycache__/
+*.pyc
+.pytest_cache/
+worker/data/*.db
+.venv/
+
+# 미리 채운 환경 템플릿 (VAPID 개인키 포함) — 커밋 금지
+web/env.local.txt
+worker/env.txt
+# Chrome 확장 개발 프로필
+extension/_profile/
