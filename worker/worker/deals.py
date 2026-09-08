@@ -358,13 +358,24 @@ def enrich(deal: Deal, get: Callable[[str], str] = None, resolve: Callable[[str]
 
 def enrich_pending(store, limit: int = ENRICH_PER_RUN, delay: float = ENRICH_DELAY) -> tuple[int, int]:
     """보강 안 된 최신 딜을 limit 건 처리. (처리 수, shop_url 찾은 수)"""
-    found = 0
+    found = failed = 0
     todo = store.deals_to_enrich(limit)
     for d in todo:
         enrich(d)
-        store.update_deal(d)
+        for attempt in range(3):            # Supabase 게이트웨이 504 등 일시 오류는 재시도, 끝내 실패해도 다음 딜로
+            try:
+                store.update_deal(d)
+                break
+            except Exception as e:  # noqa: BLE001
+                if attempt == 2:
+                    failed += 1
+                    log.warning("딜 저장 실패(건너뜀) %s: %s", d.url[:60], str(e)[:100])
+                else:
+                    time.sleep(2 * (attempt + 1))
         found += 1 if d.shop_url else 0
         time.sleep(delay)
+    if failed:
+        log.warning("딜 보강 저장 실패 %d건 — 다음 실행에서 다시 시도", failed)
     return len(todo), found
 
 
@@ -405,6 +416,9 @@ def run_deals(store, now: Optional[datetime] = None) -> int:
     n = store.upsert_deals(deals)
     store.prune_deals(now - timedelta(days=KEEP_DAYS))
     log.info("딜 수집 %d건(신규 %d) — %s", len(deals), n, ", ".join(f"{k} {v}" for k, v in status.items()))
-    done, found = enrich_pending(store)
-    log.info("딜 보강 %d건 처리, 상점 링크 %d건", done, found)
+    try:
+        done, found = enrich_pending(store)
+        log.info("딜 보강 %d건 처리, 상점 링크 %d건", done, found)
+    except Exception as e:  # noqa: BLE001
+        log.warning("딜 보강 중단(수집분은 저장됨): %s", str(e)[:120])
     return n

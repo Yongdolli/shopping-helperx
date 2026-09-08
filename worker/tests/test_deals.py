@@ -153,3 +153,21 @@ def test_enrich_pending_marks_and_updates(tmp_path, monkeypatch):
     d = st.list_deals(NOW - timedelta(days=1))[0]
     assert d.enriched and d.shop_url == "https://www.gmarket.co.kr/item?goodscode=9"
     assert st.deals_to_enrich(10) == []
+
+
+def test_enrich_pending_retries_store_failures(tmp_path, monkeypatch):
+    """Supabase 504 같은 일시 오류: 재시도 후 성공하거나, 끝내 실패해도 다음 딜로 넘어간다."""
+    st = SqliteStorage(tmp_path / "t.db")
+    st.upsert_deals([Deal(f"https://www.clien.net/service/board/jirum/{i}", "clien", "x", "x", f"A{i}", 1000, posted_at=NOW, fetched_at=NOW) for i in range(2)])
+    monkeypatch.setattr(D, "_get", lambda url: "<html></html>")
+    monkeypatch.setattr(D.time, "sleep", lambda s: None)
+    calls = {"n": 0}
+    real = st.update_deal
+    def flaky(d):
+        calls["n"] += 1
+        if calls["n"] <= 4:          # 첫 딜: 3번 모두 실패 → 건너뜀, 둘째 딜: 1번 실패 후 성공
+            raise RuntimeError("Gateway Timeout")
+        real(d)
+    monkeypatch.setattr(st, "update_deal", flaky)
+    assert D.enrich_pending(st, delay=0) == (2, 0)
+    assert len(st.deals_to_enrich(10)) == 1       # 실패한 첫 딜만 남아 다음 실행에서 재시도
