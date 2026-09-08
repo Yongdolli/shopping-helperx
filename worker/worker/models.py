@@ -146,6 +146,30 @@ class UserSettings:
     telegram_chat_id: Optional[str] = None
     digest: bool = True          # 하루 3회 모아 받기 (False = 감지 즉시 발송)
     instant_target: bool = True  # digest 여도 목표가 도달(target)은 즉시
+    deal_min_pct: float = 30.0   # 딜 피드: 이 할인율 이상만 '확인된 딜'로 (다이제스트 포함)
+    deal_keywords: Optional[str] = None   # 관심 키워드 (쉼표 구분) — 일치하면 할인율 없어도 다이제스트에 포함
+
+
+@dataclass
+class Deal:
+    """핫딜 커뮤니티에서 모은 딜 1건 (deals.py). url = 게시글 주소, 중복 제거 키."""
+
+    url: str
+    source: str                   # ppomppu | ruliweb | clien | quasarzone | fmkorea
+    site: str                     # 우리 site 키 또는 상점명 소문자
+    site_label: str               # 원문 [사이트]
+    title: str
+    price: Optional[float]
+    currency: str = "KRW"
+    shipping: Optional[str] = None
+    pct: Optional[float] = None   # 제목에 명시된 할인율만
+    posted_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    image_url: Optional[str] = None
+    category: Optional[str] = None
+    shop_url: Optional[str] = None      # 게시글에서 찾은 상점 상품 주소 (enrich) → 원클릭 추적
+    list_price: Optional[float] = None  # 상점 페이지 정가 (enrich) → pct 근거
+    enriched: bool = False              # 보강 시도 완료 (실패해도 True — 재시도 안 함)
 
 
 @dataclass

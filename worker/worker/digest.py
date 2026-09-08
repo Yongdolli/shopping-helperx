@@ -8,7 +8,8 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from .models import Alert, Product
+from .deals import fmt_deal, pick_for_digest
+from .models import Alert, Deal, Product
 from .notify import KIND_LABEL, render, send_email, send_push, send_telegram
 from .storage import Storage
 
@@ -24,15 +25,20 @@ def slot_label(now: Optional[datetime] = None) -> str:
     return "🌅 아침 알림" if h < 11 else "☀️ 점심 알림" if h < 16 else "🌙 저녁 알림"
 
 
-def render_digest(alerts: list[Alert], products: dict[str, Product], now: Optional[datetime] = None) -> tuple[str, str, str]:
-    """(제목, 본문, 푸시 한 줄). 종류 우선순위 순으로 묶고, 같은 상품은 최신 1건만."""
+def render_digest(alerts: list[Alert], products: dict[str, Product], now: Optional[datetime] = None,
+                  picks: Optional[list[tuple[Deal, str]]] = None) -> tuple[str, str, str]:
+    """(제목, 본문, 푸시 한 줄). 종류 우선순위 순으로 묶고, 같은 상품은 최신 1건만. picks = 딜 피드에서 고른 (딜, 이유)."""
+    picks = picks or []
     latest: dict[tuple[str, str], Alert] = {}
     for a in sorted(alerts, key=lambda a: a.created_at):
         latest[(a.product_id, a.kind)] = a
     items = list(latest.values())
     counts = Counter(a.kind for a in items)
-    title = f"{slot_label(now)} — 새 알림 {len(items)}건"
-    summary = " · ".join(f"{KIND_LABEL.get(k, k)} {counts[k]}" for k in KIND_ORDER if counts[k])
+    head = [f"새 알림 {len(items)}건"] if items else []
+    if picks:
+        head.append(f"딜 {len(picks)}건")
+    title = f"{slot_label(now)} — " + " · ".join(head)
+    summary = " · ".join([f"{KIND_LABEL.get(k, k)} {counts[k]}" for k in KIND_ORDER if counts[k]] + ([f"🔥 딜 {len(picks)}"] if picks else []))
 
     lines = [summary]
     for kind in KIND_ORDER:
@@ -50,6 +56,11 @@ def render_digest(alerts: list[Alert], products: dict[str, Product], now: Option
             lines.extend("   " + ln for ln in body.splitlines())
         if len(group) > MAX_PER_KIND:
             lines.append(f"   … 외 {len(group) - MAX_PER_KIND}건")
+    if picks:
+        lines.append("\n[🔥 딜] 핫딜 커뮤니티에서 고른 것 — 표시 할인율이라 정가 부풀리기가 섞일 수 있음")
+        for d, why in picks:
+            lines.append(f"• {fmt_deal(d)} · {why}")
+            lines.append(f"   {d.url}")
     lines.append("\n앱 알림 탭에서 전체를 볼 수 있습니다. 즉시 알림으로 바꾸려면 설정 → '하루 3회 모아 받기' 를 끄세요.")
     return title, "\n".join(lines), summary
 
@@ -60,13 +71,17 @@ def run_digest(store: Storage, dry_run: bool = False, now: Optional[datetime] = 
     by_user: dict[Optional[str], list[Product]] = {}
     for p in products.values():
         by_user.setdefault(p.user_id, []).append(p)
+    now_ = now or datetime.now(timezone.utc)
+    recent_deals = store.list_deals(now_ - timedelta(hours=9))   # 직전 다이제스트 이후 올라온 딜
     n = 0
     for uid in by_user:
         pending = store.pending_alerts(uid)
-        if not pending:
-            continue
         us = store.settings_for(uid)
-        title, body, line = render_digest(pending, products, now)
+        keywords = [k for k in (us.deal_keywords or "").split(",") if k.strip()]
+        picks = pick_for_digest(recent_deals, keywords, us.deal_min_pct)
+        if not pending and not picks:
+            continue
+        title, body, line = render_digest(pending, products, now, picks)
         if dry_run:
             print(f"--- user={uid or 'local'}\n{title}\n{body}\n")
             continue
@@ -83,7 +98,7 @@ def run_digest(store: Storage, dry_run: bool = False, now: Optional[datetime] = 
         if us.notify_email and send_email(title, body, us.email):
             sent.append("email")
         store.mark_notified([a.id for a in pending if a.id is not None])
-        log.info("다이제스트 user=%s %d건 발송=%s", uid or "local", len(pending), sent or "채널 없음(앱 내)")
+        log.info("다이제스트 user=%s 알림 %d건·딜 %d건 발송=%s", uid or "local", len(pending), len(picks), sent or "채널 없음(앱 내)")
         n += 1
     return n
 

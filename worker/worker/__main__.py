@@ -1,4 +1,4 @@
-"""CLI: python -m worker <run|demo|add|list|vapid|doctor|report|digest|user>"""
+"""CLI: python -m worker <run|demo|add|list|vapid|doctor|report|digest|deals|user>"""
 from __future__ import annotations
 
 import argparse
@@ -117,6 +117,7 @@ def main() -> None:
     r.add_argument("--dry-run", action="store_true", help="발송하지 않고 출력만")
     d = sub.add_parser("digest", help="대기 중 알림을 모아 발송 (아침·점심·저녁 크론)")
     d.add_argument("--dry-run", action="store_true", help="발송·처리하지 않고 출력만")
+    sub.add_parser("deals", help="핫딜 커뮤니티에서 딜 수집 (매시 크론)")
     u = sub.add_parser("user", help="자동 로그인용 계정 생성/비밀번호 갱신 (Supabase)")
     u.add_argument("email")
     u.add_argument("password")
@@ -146,6 +147,9 @@ def main() -> None:
     elif args.cmd == "digest":
         from .digest import run_digest
         run_digest(store, dry_run=args.dry_run)
+    elif args.cmd == "deals":
+        from .deals import run_deals
+        run_deals(store)
 
 
 if __name__ == "__main__":

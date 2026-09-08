@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional, Protocol
 
 from .config import settings
-from .models import Alert, PriceSnapshot, Product, PushSubscription, UserSettings
+from .models import Alert, Deal, PriceSnapshot, Product, PushSubscription, UserSettings
 
 
 def _iso(dt: datetime) -> str:
@@ -25,7 +25,8 @@ def _parse(s: Optional[str]) -> Optional[datetime]:
 def _default_settings(user_id: Optional[str]) -> UserSettings:
     return UserSettings(user_id, settings.threshold_pct, settings.window_days,
                         bool(settings.alert_email_to), bool(settings.telegram_chat_id), True,
-                        settings.alert_email_to or None, settings.telegram_chat_id or None, settings.digest, True)
+                        settings.alert_email_to or None, settings.telegram_chat_id or None, settings.digest, True,
+                        30.0, None)
 
 
 class Storage(Protocol):
@@ -48,6 +49,11 @@ class Storage(Protocol):
     def push_subscriptions(self, user_id: Optional[str]) -> list[PushSubscription]: ...
     def add_push_subscription(self, s: PushSubscription) -> None: ...
     def remove_push_subscription(self, endpoint: str) -> None: ...
+    def upsert_deals(self, deals: list[Deal]) -> int: ...          # 새로 들어간 건수
+    def list_deals(self, since: datetime) -> list[Deal]: ...
+    def prune_deals(self, before: datetime) -> None: ...
+    def deals_to_enrich(self, limit: int) -> list[Deal]: ...      # 보강 안 된 최신 딜
+    def update_deal(self, d: Deal) -> None: ...                    # shop_url/list_price/pct/enriched 반영
 
 
 # ---------------------------------------------------------------- SQLite
@@ -80,6 +86,11 @@ create table if not exists user_settings (
 create table if not exists push_subscriptions (
   endpoint text primary key, user_id text, p256dh text not null, auth text not null, created_at text not null
 );
+create table if not exists deals (
+  url text primary key, source text not null, site text not null, site_label text, title text not null,
+  price real, currency text not null default 'KRW', shipping text, pct real, image_url text, category text,
+  posted_at text not null, fetched_at text not null, shop_url text, list_price real, enriched integer not null default 0
+);
 """
 
 
@@ -89,9 +100,10 @@ class SqliteStorage:
         self.conn = sqlite3.connect(path)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SQLITE_SCHEMA)
-        for col in ("digest", "instant_target"):   # 기존 DB 에 컬럼 추가 (v0.8)
+        for col, ddl in (("digest", "integer default 1"), ("instant_target", "integer default 1"),   # 기존 DB 에 컬럼 추가 (v0.8~)
+                         ("deal_min_pct", "real default 30"), ("deal_keywords", "text")):
             try:
-                self.conn.execute(f"alter table user_settings add column {col} integer default 1")
+                self.conn.execute(f"alter table user_settings add column {col} {ddl}")
                 if col == "digest":   # v0.8 이전 알림은 이미 보낸 것 — 첫 다이제스트에 쏟아지지 않게
                     self.conn.execute("update alerts set notified=1 where notified=0")
                 self.conn.commit()
@@ -206,7 +218,8 @@ class SqliteStorage:
         return UserSettings(r["user_id"], r["threshold_pct"], r["window_days"], bool(r["notify_email"]),
                             bool(r["notify_telegram"]), bool(r["notify_push"]), r["email"], r["telegram_chat_id"],
                             bool(r["digest"]) if r["digest"] is not None else True,
-                            bool(r["instant_target"]) if r["instant_target"] is not None else True)
+                            bool(r["instant_target"]) if r["instant_target"] is not None else True,
+                            float(r["deal_min_pct"]) if r["deal_min_pct"] is not None else 30.0, r["deal_keywords"])
 
     def push_subscriptions(self, user_id: Optional[str]) -> list[PushSubscription]:
         rows = self.conn.execute("select * from push_subscriptions where user_id is ?", (user_id,))
@@ -220,6 +233,41 @@ class SqliteStorage:
     def remove_push_subscription(self, endpoint: str) -> None:
         self.conn.execute("delete from push_subscriptions where endpoint=?", (endpoint,))
         self.conn.commit()
+
+    def upsert_deals(self, deals: list[Deal]) -> int:
+        n = 0
+        for d in deals:
+            cur = self.conn.execute(
+                "insert or ignore into deals(url,source,site,site_label,title,price,currency,shipping,pct,image_url,category,posted_at,fetched_at,shop_url,list_price,enriched)"
+                " values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (d.url, d.source, d.site, d.site_label, d.title, d.price, d.currency, d.shipping, d.pct, d.image_url, d.category,
+                 _iso(d.posted_at), _iso(d.fetched_at), d.shop_url, d.list_price, int(d.enriched)))
+            n += cur.rowcount
+        self.conn.commit()
+        return n
+
+    def list_deals(self, since: datetime) -> list[Deal]:
+        rows = self.conn.execute("select * from deals where posted_at>=? order by posted_at desc", (_iso(since),))
+        return [self._row_to_deal(r) for r in rows]
+
+    def prune_deals(self, before: datetime) -> None:
+        self.conn.execute("delete from deals where posted_at<?", (_iso(before),))
+        self.conn.commit()
+
+    def deals_to_enrich(self, limit: int) -> list[Deal]:
+        rows = self.conn.execute("select * from deals where enriched=0 order by posted_at desc limit ?", (limit,))
+        return [self._row_to_deal(r) for r in rows]
+
+    def update_deal(self, d: Deal) -> None:
+        self.conn.execute("update deals set shop_url=?, list_price=?, pct=?, price=?, enriched=? where url=?",
+                          (d.shop_url, d.list_price, d.pct, d.price, int(d.enriched), d.url))
+        self.conn.commit()
+
+    @staticmethod
+    def _row_to_deal(r: sqlite3.Row) -> Deal:
+        return Deal(r["url"], r["source"], r["site"], r["site_label"] or "", r["title"], r["price"], r["currency"], r["shipping"],
+                    r["pct"], _parse(r["posted_at"]), _parse(r["fetched_at"]), r["image_url"], r["category"],
+                    r["shop_url"], r["list_price"], bool(r["enriched"]))
 
     @staticmethod
     def _row_to_alert(r: sqlite3.Row) -> Alert:
@@ -337,7 +385,8 @@ class SupabaseStorage:
         r = rows[0]
         return UserSettings(user_id, float(r["threshold_pct"]), int(r["window_days"]), r["notify_email"],
                             r["notify_telegram"], r.get("notify_push", True), r.get("email"), r.get("telegram_chat_id"),
-                            bool(r.get("digest", True)), bool(r.get("instant_target", True)))
+                            bool(r.get("digest", True)), bool(r.get("instant_target", True)),
+                            float(r.get("deal_min_pct") or 30), ",".join(r.get("deal_keywords") or []) or None)
 
     def push_subscriptions(self, user_id: Optional[str]) -> list[PushSubscription]:
         if not user_id:
@@ -351,6 +400,40 @@ class SupabaseStorage:
 
     def remove_push_subscription(self, endpoint: str) -> None:
         self.db.table("push_subscriptions").delete().eq("endpoint", endpoint).execute()
+
+    def upsert_deals(self, deals: list[Deal]) -> int:
+        if not deals:
+            return 0
+        rows = [{"url": d.url, "source": d.source, "site": d.site, "site_label": d.site_label, "title": d.title, "price": d.price,
+                 "currency": d.currency, "shipping": d.shipping, "pct": d.pct, "image_url": d.image_url, "category": d.category,
+                 "posted_at": _iso(d.posted_at), "fetched_at": _iso(d.fetched_at), "shop_url": d.shop_url, "list_price": d.list_price,
+                 "enriched": d.enriched} for d in deals]
+        n = 0
+        for i in range(0, len(rows), 100):
+            n += len(self.db.table("deals").upsert(rows[i:i + 100], on_conflict="url", ignore_duplicates=True).execute().data)
+        return n
+
+    def list_deals(self, since: datetime) -> list[Deal]:
+        rows = self.db.table("deals").select("*").gte("posted_at", _iso(since)).order("posted_at", desc=True).limit(1000).execute().data
+        return [self._to_deal(r) for r in rows]
+
+    def prune_deals(self, before: datetime) -> None:
+        self.db.table("deals").delete().lt("posted_at", _iso(before)).execute()
+
+    def deals_to_enrich(self, limit: int) -> list[Deal]:
+        rows = self.db.table("deals").select("*").eq("enriched", False).order("posted_at", desc=True).limit(limit).execute().data
+        return [self._to_deal(r) for r in rows]
+
+    def update_deal(self, d: Deal) -> None:
+        self.db.table("deals").update({"shop_url": d.shop_url, "list_price": d.list_price, "pct": d.pct, "price": d.price,
+                                       "enriched": d.enriched}).eq("url", d.url).execute()
+
+    @staticmethod
+    def _to_deal(r: dict) -> Deal:
+        f = lambda k: float(r[k]) if r.get(k) is not None else None  # noqa: E731
+        return Deal(r["url"], r["source"], r["site"], r.get("site_label") or "", r["title"], f("price"), r.get("currency") or "KRW",
+                    r.get("shipping"), f("pct"), _parse(r["posted_at"]), _parse(r.get("fetched_at")) or _parse(r["posted_at"]),
+                    r.get("image_url"), r.get("category"), r.get("shop_url"), f("list_price"), bool(r.get("enriched", False)))
 
     @staticmethod
     def _to_alert(r: dict) -> Alert:

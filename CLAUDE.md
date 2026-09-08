@@ -1,14 +1,14 @@
 # Shopping Helper — Claude Code 프로젝트 가이드
 
 한국·중국·미국 쇼핑몰 가격을 주기적으로 수집해, 같은 상품이 **최근 90일 중앙값 대비 10% 이상 싸지면** 알려주는 서비스.
-폰·패드·PC 공용 PWA + Python 수집 워커 + Supabase. 현재 v0.8.
+폰·패드·PC 공용 PWA + Python 수집 워커 + Supabase. 현재 v0.9.
 
 ## 구조
 
 ```
 web/        React + Vite + TS + Tailwind v4 + Zustand PWA (사용자 화면, src/sw.ts 서비스워커 = 웹푸시 수신)
-worker/     Python 수집 워커: 어댑터 → 스냅샷 저장 → 기준선 계산 → 알림 판정 → 발송(푸시·텔레그램·이메일) + 주간 리포트(report.py)
-supabase/   DB 마이그레이션 SQL (001 초기, 002 옵션·푸시·정가, 003 수동 기록 RLS, 004 정품 리스크, 005 극단값 확인·관세 카테고리, 006 목표가·구매·태그, 007 다이제스트·목표가 즉시, 008 upsert 키 수정, 009 가족 공유)
+worker/     Python 수집 워커: 어댑터 → 스냅샷 저장 → 기준선 계산 → 알림 판정 → 발송(푸시·텔레그램·이메일) + 주간 리포트(report.py) + 딜 피드(deals.py)
+supabase/   DB 마이그레이션 SQL (001 초기, 002 옵션·푸시·정가, 003 수동 기록 RLS, 004 정품 리스크, 005 극단값 확인·관세 카테고리, 006 목표가·구매·태그, 007 다이제스트·목표가 즉시, 008 upsert 키 수정, 009 가족 공유, 010 딜 피드)
 extension/  Chrome 확장(MV3) — 북마클릿과 같은 추출 로직을 build.mjs 가 content.js 로 생성. 원클릭 가격 기록
 github-workflows/  GitHub Actions 크론: collect.yml(매시) · daily-digest.yml(08:00·12:30·19:00 KST) · weekly-report.yml(월요일 09:00 KST). push-to-github.cmd 가 .github/workflows/ 로 옮김
 docs/       구상안·설계 문서
@@ -26,6 +26,11 @@ docs/       구상안·설계 문서
 - **다이제스트** (`user_settings.digest`, 기본 true, `worker/digest.py`): 워커는 알림을 `notified=False` 로 저장만 하고 `python -m worker digest` 가 아침 08:00·점심 12:30·저녁 19:00 KST 에
   대기 알림을 사용자별로 모아 한 번에 발송(종류 우선순위 순, 같은 상품·종류는 최신 1건). 새 알림이 없으면 발송 없음. digest=false 면 감지 즉시 발송(기존 동작). 앱 알림 탭에는 항상 즉시 쌓임.
   SQLite 로컬 사용자 기본값은 env `DIGEST`(기본 1). `instant_target`(기본 true)이면 `target` 은 다이제스트를 건너뛰고 즉시.
+- **딜 피드** (`worker/deals.py`, `deals` 공용 테이블 010, 웹 `/deals` 탭): 등록하지 않은 상품까지 "모든 사이트"의 할인을 보는 기능. 사이트 전체 크롤링은 불가능하므로
+  **핫딜 커뮤니티**(뽐뿌 RSS·루리웹 RSS·클리앙·퀘이사존·에펨코리아)를 매시간 읽어 `[사이트] 상품명 (가격/배송)` 을 파싱(`parse_title`). 게시글 URL 로 중복 제거, 7일 보관, robots 준수, 소스별 실패 격리.
+  `pct` 는 제목에 'N%'·'반값' 이 있을 때만 (커뮤니티 글은 대개 가격만). 사용자 설정 `deal_min_pct`(기본 30)·`deal_keywords` — 다이제스트에 키워드 일치 → pct≥min 순으로 최대 10건 포함(`pick_for_digest`),
+  알림이 없어도 딜이 있으면 다이제스트 발송. **보강(enrich)**: 새 딜은 실행당 25건씩 게시글을 열어 상점 링크(`shop_url`, 리다이렉트·단축링크 해제)를 찾고, 봇 차단 아닌 상점이면 JSON-LD 로
+  정가/표시가를 읽어 딜 가격이 더 싸면 `list_price`·`pct` 를 채운다(실측: 링크 72%, 할인율은 소수). `shop_url` 이 있으면 웹 딜 탭에서 원클릭 추적, 없으면 `/add?title=` 로 보내 상점 URL 을 붙여넣게 한다. 공식 API 딜(쿠팡 골드박스·11번가 쇼킹딜·BestBuy onSale)은 키가 생기면 소스로 추가.
 - **가족 공유** (`shares` 테이블, 009): 태그(또는 전체) 단위 읽기 전용 링크 `/s/<token>`. 로그인 없이 열리며 `shared_info/shared_products/shared_snapshots` security definer RPC 로만 읽는다
   (anon 은 테이블 직접 접근 불가, 토큰 12바이트 난수). 웹은 받은 상품·스냅샷으로 `overview/enrich` 를 그대로 돌려 카드를 만든다(임계값 10%, 90일). 구매 완료·비활성 상품 제외. 데모 모드는 같은 브라우저에서만.
 - **가짜 할인** = 사이트 표시 할인율(정가 대비) ≥ 20% 인데 실제(기준선 대비) ≤ 3%. `baseline.is_fake_discount`.
@@ -95,6 +100,7 @@ python -m worker add "<상품 URL>" [--title "상품명"]   # 쿠팡은 --title 
 python -m worker list                       # 상품·최근가·실패 횟수
 python -m worker vapid                      # 웹푸시 VAPID 키 생성 (무료)
 python -m worker doctor                     # 키·연결·어댑터 상태 점검
+python -m worker deals                      # 핫딜 커뮤니티 딜 수집 (collect 크론에서 매시)
 python -m worker digest --dry-run           # 대기 알림 모아 발송 (아침·점심·저녁 크론)
 python -m worker report --dry-run           # 주간 요약 리포트 (--dry-run 은 출력만)
 pytest                                      # 78개 (+ PG_BIN=<postgres bin> 이면 마이그레이션 실검증 3개: tests/test_migrations.py, psycopg 필요)
@@ -114,7 +120,8 @@ node extension/build.mjs                    # content.js 재생성 → chrome://
 ## 데이터 모델
 
 products(variant, fail_count, last_error, last_fetched_at, verified, risk_level, risk_reasons, category, target_price, tags, purchased_at, purchased_price) → price_snapshots(price, list_price, seller, in_stock, suspect) → alerts(kind, note).
-user_settings(threshold_pct, window_days, notify_push/email/telegram, digest, instant_target). shares(token, user_id, tag, name). push_subscriptions(endpoint, p256dh, auth).
+user_settings(threshold_pct, window_days, notify_push/email/telegram, digest, instant_target, deal_min_pct, deal_keywords). shares(token, user_id, tag, name).
+deals(url, source, site, site_label, title, price, shipping, pct, posted_at) — 공용. push_subscriptions(endpoint, p256dh, auth).
 
 ## 코딩 컨벤션
 
@@ -124,4 +131,4 @@ user_settings(threshold_pct, window_days, notify_push/email/telegram, digest, in
 
 ## 로드맵 (docs/Shopping_Helper_구상안_v0.1.md)
 
-v0.1 프로토타입 → v0.2 쿠팡·웹푸시·가짜할인·옵션분리 → v0.3 네이버 어댑터·robots 준수·북마클릿 캡처 → v0.4 정품 리스크 점수 → v0.5 극단값 확인·자동 중단·크로스보더·세일 캘린더·공유·CSV → v0.6 구매 결정 카드·목표가·구매/절약액·태그·추세·UI 개편 → v0.7 doctor·다나와 어댑터·실데이터 타이밍·구매 성적표·Chrome 확장 → **v0.8 (현재)** 판매자 이력 신호·주간 리포트·워커 세일/추세 동기화 → **Supabase 연결·배포·실제 API 키·텔레그램 봇 (사용자)** → v0.9 가족 공유·구매 데이터 기반 타이밍 점수·실사용 튜닝 → 수익화
+v0.1 프로토타입 → v0.2 쿠팡·웹푸시·가짜할인·옵션분리 → v0.3 네이버 어댑터·robots 준수·북마클릿 캡처 → v0.4 정품 리스크 점수 → v0.5 극단값 확인·자동 중단·크로스보더·세일 캘린더·공유·CSV → v0.6 구매 결정 카드·목표가·구매/절약액·태그·추세·UI 개편 → v0.7 doctor·다나와 어댑터·실데이터 타이밍·구매 성적표·Chrome 확장 → v0.8 판매자 이력 신호·주간 리포트·다이제스트·가족 공유·자동 로그인 → **v0.9 (현재)** 딜 피드(핫딜 커뮤니티) → 실사용 튜닝·공식 API 딜 소스·구매 데이터 기반 타이밍 점수 → 수익화

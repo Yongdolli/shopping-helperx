@@ -1,12 +1,13 @@
 import { create } from "zustand";
 import { api } from "./lib/api";
-import type { Alert, ProductOverview, UserSettings } from "./types";
+import type { Alert, Deal, ProductOverview, UserSettings } from "./types";
 import { getRates, FALLBACK_KRW, type Rates } from "./lib/fx";
 import type { CsvRow } from "./lib/csv";
 
 interface State {
   products: ProductOverview[];   // 중단 상품 포함
   alerts: Alert[];
+  deals: Deal[];
   settings: UserSettings | null;
   loading: boolean;
   error: string | null;
@@ -31,6 +32,7 @@ interface State {
 export const useStore = create<State>((set, get) => ({
   products: [],
   alerts: [],
+  deals: [],
   settings: null,
   loading: false,
   error: null,
@@ -42,10 +44,10 @@ export const useStore = create<State>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const [settings, fx] = await Promise.all([api.getSettings(), getRates()]);
-      const [products, alerts, userEmail] = await Promise.all([
-        api.listOverview(fx.rates, settings.threshold_pct), api.listAlerts(), api.currentUserEmail(),
+      const [products, alerts, userEmail, deals] = await Promise.all([
+        api.listOverview(fx.rates, settings.threshold_pct), api.listAlerts(), api.currentUserEmail(), api.listDeals(7).catch(() => [] as Deal[]),
       ]);
-      set({ products, alerts, settings, userEmail, rates: fx.rates, ratesLive: fx.live, loading: false });
+      set({ products, alerts, deals, settings, userEmail, rates: fx.rates, ratesLive: fx.live, loading: false });
     } catch (e) {
       set({ error: (e as Error).message, loading: false });
     }

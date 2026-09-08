@@ -5,6 +5,7 @@ import Dashboard from "./pages/Dashboard";
 import ProductDetail from "./pages/ProductDetail";
 import AddProduct from "./pages/AddProduct";
 import Alerts from "./pages/Alerts";
+import Deals from "./pages/Deals";
 import Settings from "./pages/Settings";
 import Login from "./pages/Login";
 import Capture from "./pages/Capture";
@@ -44,6 +45,7 @@ export default function App() {
           <Route index element={<Dashboard />} />
           <Route path="p/:id" element={<ProductDetail />} />
           <Route path="add" element={<AddProduct />} />
+          <Route path="deals" element={<Deals />} />
           <Route path="alerts" element={<Alerts />} />
           <Route path="settings" element={<Settings />} />
           <Route path="capture" element={<Capture />} />

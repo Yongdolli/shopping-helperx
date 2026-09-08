@@ -25,7 +25,7 @@ pytest
 
 ## 운영 연결 순서
 
-1. Supabase 프로젝트 생성 → SQL Editor 에서 `supabase/ALL_MIGRATIONS.sql`(합본) 을 한 번에 실행 (또는 `migrations/001~009` 를 번호 순서로)
+1. Supabase 프로젝트 생성 → SQL Editor 에서 `supabase/ALL_MIGRATIONS.sql`(합본) 을 한 번에 실행 (또는 `migrations/001~010` 을 번호 순서로)
 2. `web/.env.local` 에 `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (Auth → Email 로그인 켜기)
 3. `worker/.env` 에 `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` + 텔레그램/이메일/사이트 API 키 (`.env.example` 참고)
 4. `python -m worker vapid` 로 웹푸시 키 생성 → 웹·워커 .env 에 등록 (설정 화면에서 "켜기")
@@ -46,6 +46,11 @@ pytest
 | Amazon·테무·네이버 가격비교 | 봇 차단 강함 — **북마클릿**(설정 화면)으로 본인 브라우저에서 기록 | 없음 |
 
 새 사이트 추가: `worker/worker/adapters/` 에 `BaseAdapter` 상속 파일 하나 + `registry.py` 에 한 줄.
+
+## v0.9 에 들어간 것
+
+- **🔥 딜 탭** — 상품을 등록하지 않아도 뽐뿌·루리웹·클리앙·퀘이사존·에펨코리아 핫딜을 매시간 모아 보여줍니다(최근 7일). 사이트·검색·할인율순, "할인율 30%↑ 확인"·관심 키워드 필터, 게시글 열기·추적 전환.
+  설정의 최소 할인율·관심 키워드에 맞는 딜은 아침·점심·저녁 다이제스트에도 들어갑니다. 표시 할인율은 게시글 기준이라 정가 부풀리기가 섞일 수 있고, 추적으로 넘기면 평소 가격 대비 판정이 붙습니다.
 
 ## v0.8 에 들어간 것
 

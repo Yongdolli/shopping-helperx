@@ -56,6 +56,17 @@ export interface UserSettings {
   telegram_chat_id?: string | null;
   digest: boolean;               // 하루 3회 모아 받기 (08:00·12:30·19:00 KST). false = 감지 즉시
   instant_target: boolean;       // digest 여도 목표가 도달은 즉시
+  deal_min_pct: number;          // 딜 탭·다이제스트: 이 할인율 이상만 '확인된 딜'
+  deal_keywords: string[];       // 관심 키워드 — 일치하면 할인율 없어도 다이제스트에 포함
+}
+
+/** 핫딜 커뮤니티에서 워커가 모은 딜 (전 사용자 공용). url = 게시글 */
+export interface Deal {
+  url: string; source: string; site: string; site_label?: string | null; title: string;
+  price: number | null; currency: string; shipping?: string | null; pct: number | null;
+  image_url?: string | null; category?: string | null; posted_at: string;
+  shop_url?: string | null;      // 상점 상품 주소 (있으면 원클릭 추적)
+  list_price?: number | null;    // 상점 정가 (있으면 pct 는 정가 대비 계산값)
 }
 
 /** 가족 공유 링크 — 태그(또는 전체) 단위 읽기 전용. /s/:token 은 로그인 없이 열린다 */

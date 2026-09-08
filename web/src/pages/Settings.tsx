@@ -92,6 +92,19 @@ export default function Settings() {
         <button className="btn-primary" onClick={save}>{saved ? "저장됨 ✓" : "저장"}</button>
       </section>
 
+      <section className="card p-4 md:p-6 space-y-4">
+        <h2 className="font-semibold">🔥 딜 필터</h2>
+        <p className="text-xs text-slate-500">핫딜 커뮤니티 5곳(뽐뿌·루리웹·클리앙·퀘이사존·에펨코리아)에서 매시간 모은 딜 중, 아래 조건에 맞는 것을 딜 탭에서 강조하고 아침·점심·저녁 다이제스트에 넣습니다.</p>
+        <Field label={`최소 할인율: ${s.deal_min_pct ?? 30}%`} hint="게시글에 할인율이 적힌 딜 중 이 값 이상만">
+          <input type="range" min={10} max={70} step={5} value={s.deal_min_pct ?? 30} onChange={(e) => set("deal_min_pct", Number(e.target.value))} className="w-full accent-sky-600" />
+        </Field>
+        <Field label="관심 키워드" hint="쉼표로 구분. 제목에 포함되면 할인율이 없어도 알려줍니다 (예: 마우스, 헤드폰, 로봇청소기)">
+          <input className="input" placeholder="마우스, 헤드폰, 로봇청소기" value={(s.deal_keywords ?? []).join(", ")}
+            onChange={(e) => set("deal_keywords", e.target.value.split(/[,，]/).map((k) => k.trim()).filter(Boolean))} />
+        </Field>
+        <button className="btn-primary" onClick={save}>{saved ? "저장됨 ✓" : "저장"}</button>
+      </section>
+
       <ShareSection />
       <BookmarkletSection />
       <CsvSection />

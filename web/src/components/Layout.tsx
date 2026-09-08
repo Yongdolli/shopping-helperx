@@ -5,6 +5,7 @@ import Toast from "./Toast";
 
 const NAV = [
   { to: "/", label: "홈", icon: "⌂" },
+  { to: "/deals", label: "딜", icon: "🔥" },
   { to: "/alerts", label: "알림", icon: "🔔" },
   { to: "/add", label: "추가", icon: "＋" },
   { to: "/settings", label: "설정", icon: "⚙" },
@@ -39,7 +40,7 @@ export default function Layout() {
             )}
           </NavLink>
         ))}
-        <div className="mt-auto px-2 text-[11px] text-slate-400">v0.1 · 90일 중앙값 기준</div>
+        <div className="mt-auto px-2 text-[11px] text-slate-400">v0.9 · 90일 중앙값 기준</div>
       </aside>
 
       {/* 본문 */}
@@ -57,7 +58,7 @@ export default function Layout() {
       <Toast />
 
       {/* 모바일 하단 탭 */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-10 grid grid-cols-4 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 pb-[env(safe-area-inset-bottom)]">
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-10 grid grid-cols-5 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 pb-[env(safe-area-inset-bottom)]">
         {NAV.map((n) => (
           <NavLink key={n.to} to={n.to} end={n.to === "/"}
             className={({ isActive }) => `relative flex flex-col items-center py-2 text-[11px] ${isActive ? "text-sky-600" : "text-slate-500"}`}>

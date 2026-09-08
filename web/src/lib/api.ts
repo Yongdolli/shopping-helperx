@@ -3,7 +3,7 @@
  * VITE_SUPABASE_URL 이 있으면 Supabase, 없으면 브라우저 로컬 데모 저장소.
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { Alert, Product, ProductOverview, PushSubscriptionJson, ShareLink, Snapshot, UserSettings } from "../types";
+import type { Alert, Deal, Product, ProductOverview, PushSubscriptionJson, ShareLink, Snapshot, UserSettings } from "../types";
 import { claimedPct, detectSite, isFakeDiscount, median, parseVariant } from "./format";
 import { assessRisk, countSellerChanges, guessModelNo } from "./risk";
 import { decide } from "./decision";
@@ -31,6 +31,7 @@ export interface Api {
   importRows(rows: import("./csv").CsvRow[]): Promise<number>;
   removeProduct(id: string): Promise<void>;
   listAlerts(): Promise<Alert[]>;
+  listDeals(days: number): Promise<Deal[]>;   // 핫딜 피드 (워커가 수집, 공용)
   markRead(id: string): Promise<void>;
   markAllRead(): Promise<void>;
   getSettings(): Promise<UserSettings>;
@@ -52,8 +53,17 @@ export interface CaptureInput { url: string; price: number; currency: string; ti
 const CAPTURE_SELLER = "직접 기록";
 
 const DEFAULT_SETTINGS: UserSettings = {
-  threshold_pct: 10, window_days: 90, notify_push: true, notify_email: false, notify_telegram: false, email: "", telegram_chat_id: "", digest: true, instant_target: true,
+  threshold_pct: 10, window_days: 90, notify_push: true, notify_email: false, notify_telegram: false, email: "", telegram_chat_id: "", digest: true, instant_target: true, deal_min_pct: 30, deal_keywords: [],
 };
+
+/** 데모 모드용 딜 샘플 (실제로는 워커가 매시간 핫딜 커뮤니티에서 모은다) */
+const DEMO_DEALS: Deal[] = [
+  { url: "https://www.ppomppu.co.kr/zboard/view.php?id=ppomppu&no=1", source: "ppomppu", site: "coupang", site_label: "쿠팡", title: "로지텍 MX Master 3S 무선 마우스 40% 할인", price: 89000, currency: "KRW", shipping: "무료", pct: 40, shop_url: "https://www.coupang.com/vp/products/demo-mx3s", list_price: 149000, posted_at: new Date(Date.now() - 2 * 3600_000).toISOString() },
+  { url: "https://bbs.ruliweb.com/market/board/1020/read/1", source: "ruliweb", site: "gmarket", site_label: "지마켓", title: "소니 WH-1000XM5 헤드폰 반값", price: 219000, currency: "KRW", shipping: "무료", pct: 50, posted_at: new Date(Date.now() - 5 * 3600_000).toISOString() },
+  { url: "https://www.clien.net/service/board/jirum/1", source: "clien", site: "naver", site_label: "네이버", title: "앤커 737 파워뱅크 24000mAh", price: 99000, currency: "KRW", shipping: "무료", pct: null, posted_at: new Date(Date.now() - 8 * 3600_000).toISOString() },
+  { url: "https://quasarzone.com/bbs/qb_saleinfo/views/1", source: "quasarzone", site: "11st", site_label: "11번가", title: "삼성 990 PRO 2TB NVMe SSD", price: 189000, currency: "KRW", shipping: "무료", pct: null, posted_at: new Date(Date.now() - 26 * 3600_000).toISOString() },
+  { url: "https://www.fmkorea.com/1", source: "fmkorea", site: "aliexpress", site_label: "알리", title: "샤오미 로봇청소기 S20+ 35% 쿠폰", price: 259000, currency: "KRW", shipping: "무료", pct: 35, posted_at: new Date(Date.now() - 30 * 3600_000).toISOString() },
+];
 
 function dominantSeller(snaps: Snapshot[]): string | null {
   const c: Record<string, number> = {};
@@ -193,6 +203,7 @@ class DemoApi implements Api {
     this.persist();
   }
   async listAlerts() { return [...this.db.alerts].sort((a, b) => b.created_at.localeCompare(a.created_at)); }
+  async listDeals() { return DEMO_DEALS; }
   async markRead(id: string) { const a = this.db.alerts.find((x) => x.id === id); if (a) { a.read = true; this.persist(); } }
   async markAllRead() { this.db.alerts.forEach((a) => (a.read = true)); this.persist(); }
   async getSettings() { return { ...DEFAULT_SETTINGS, ...this.db.settings }; }
@@ -314,6 +325,11 @@ class SupabaseApi implements Api {
   async listAlerts() {
     const { data } = await this.sb.from("alerts").select("*").order("created_at", { ascending: false }).limit(100);
     return (data ?? []).map((a) => ({ ...a, id: String(a.id), price: Number(a.price), baseline: a.baseline == null ? null : Number(a.baseline), pct: a.pct == null ? null : Number(a.pct) })) as Alert[];
+  }
+  async listDeals(days: number) {
+    const { data } = await this.sb.from("deals").select("url,source,site,site_label,title,price,currency,shipping,pct,image_url,category,posted_at,shop_url,list_price")
+      .gte("posted_at", new Date(Date.now() - days * 86400_000).toISOString()).order("posted_at", { ascending: false }).limit(1000);
+    return (data ?? []).map((d) => ({ ...d, price: d.price == null ? null : Number(d.price), pct: d.pct == null ? null : Number(d.pct), list_price: d.list_price == null ? null : Number(d.list_price) })) as Deal[];
   }
   async markRead(id: string) { await this.sb.from("alerts").update({ read: true }).eq("id", id); }
   async markAllRead() { await this.sb.from("alerts").update({ read: true }).eq("read", false); }
