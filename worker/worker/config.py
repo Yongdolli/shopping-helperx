@@ -12,7 +12,8 @@ load_dotenv(ROOT.parent / ".env")
 
 
 def _env(key: str, default: str = "") -> str:
-    return os.getenv(key, default).strip()
+    """빈 값도 기본값으로. GitHub Actions 는 등록 안 한 secret 을 '' 로 넘기므로 int('') 같은 크래시를 막는다."""
+    return (os.getenv(key) or "").strip() or default
 
 
 @dataclass(frozen=True)
