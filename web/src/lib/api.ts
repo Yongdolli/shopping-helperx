@@ -12,6 +12,7 @@ import { landedPrice } from "./landed";
 import { buyTiming, upcomingSales } from "./sales";
 import type { Rates } from "./fx";
 import { seedDemo } from "./demo";
+import { cfg } from "../config.public";
 
 export interface Api {
   readonly mode: "supabase" | "demo";
@@ -380,10 +381,10 @@ class SupabaseApi implements Api {
   async signOut() { await this.sb.auth.signOut(); }
 }
 
-const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+const url = cfg("VITE_SUPABASE_URL");
+const key = cfg("VITE_SUPABASE_ANON_KEY");
 export const supabase = url && key ? createClient(url, key) : null;
 export const api: Api = supabase ? new SupabaseApi(supabase) : new DemoApi();
-export const VAPID_PUBLIC_KEY = (import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined) ?? "";
+export const VAPID_PUBLIC_KEY = cfg("VITE_VAPID_PUBLIC_KEY");
 /** 개인용 자동 로그인 — `python -m worker user <email> <pw>` 로 만든 계정. 둘 다 있으면 앱이 열릴 때 스스로 로그인한다 (입력 화면 없음). */
-export const AUTO_LOGIN = { email: (import.meta.env.VITE_LOGIN_EMAIL as string | undefined) ?? "", password: (import.meta.env.VITE_LOGIN_PASSWORD as string | undefined) ?? "" };
+export const AUTO_LOGIN = { email: cfg("VITE_LOGIN_EMAIL"), password: cfg("VITE_LOGIN_PASSWORD") };
