@@ -14,14 +14,19 @@ from .sales import buy_timing, upcoming_sales
 from .trend import trend_pct
 from statistics import median
 from .config import settings
-from .models import Alert, PriceSnapshot, Product
+from .models import Alert, PriceSnapshot, Product, is_manual_only
 from .notify import dispatch
 from .storage import Storage
 
 log = logging.getLogger("worker")
 
 
+MANUAL_RECHECK_HOURS = 24 * 7   # 자동 수집 불가(robots.txt) 상품은 일주일에 한 번만 다시 시도
+
+
 def _due(product: Product, min_interval_hours: float) -> bool:
+    if is_manual_only(product.last_error):
+        min_interval_hours = max(min_interval_hours, MANUAL_RECHECK_HOURS)
     if not min_interval_hours or not product.last_fetched_at:
         return True
     return datetime.now(timezone.utc) - product.last_fetched_at >= timedelta(hours=min_interval_hours)
@@ -45,6 +50,10 @@ def process_product(store: Storage, product: Product, delay: float = 1.0) -> Ale
         log.info("%s", e)
         return None
     except AdapterError as e:
+        if is_manual_only(str(e)):   # 사이트가 자동 수집을 금지 — 실패가 아니라 '북마클릿 전용'. 세지도, 중단하지도 않는다
+            log.info("[%s] %s: 자동 수집 불가(robots.txt) — 북마클릿/확장 전용, 7일 뒤 재확인", product.site, product.title[:40])
+            store.mark_fetch(product, str(e), count=False)
+            return None
         log.warning("[%s] %s: %s", product.site, product.title[:40], e)
         store.mark_fetch(product, str(e))
         return _maybe_pause(store, product, str(e))

@@ -5,7 +5,7 @@ import { useStore } from "../store";
 import PriceChart from "../components/PriceChart";
 import { toast } from "../components/Toast";
 import type { Snapshot } from "../types";
-import { ALERT_LABEL, COUNTRY_FLAG, SITE_LABEL, fmtPct, fmtPrice, timeAgo } from "../lib/format";
+import { ALERT_LABEL, COUNTRY_FLAG, SITE_LABEL, fmtPct, fmtPrice, isManualOnly, timeAgo } from "../lib/format";
 import { RISK_CLS, RISK_LABEL } from "../lib/risk";
 import { CATEGORIES, landedPrice } from "../lib/landed";
 import { buyTiming, eventStats, purchaseReport, upcomingSales } from "../lib/sales";
@@ -85,7 +85,13 @@ export default function ProductDetail() {
           </div>
         )}
         {!p.active && !p.purchased_at && <div className="mt-2 inline-block rounded-full bg-slate-200 dark:bg-slate-700 px-2 py-0.5 text-xs">추적 중단됨</div>}
-        {(p.fail_count ?? 0) >= 3 && <div className="mt-2 rounded-xl bg-rose-50 dark:bg-rose-900/30 p-3 text-xs text-rose-700 dark:text-rose-200">수집이 {p.fail_count}회 연속 실패했습니다: {p.last_error}</div>}
+        {isManualOnly(p.last_error) ? (
+          <div className="mt-2 rounded-xl bg-sky-50 dark:bg-sky-900/30 p-3 text-xs text-sky-900 dark:text-sky-100">
+            <b>{SITE_LABEL[p.site] ?? p.site}</b> 는 자동 수집을 막아 두어 워커가 가격을 못 읽습니다. 대신 <b>내 브라우저가 대신 읽는 📌 북마클릿</b>(PC Chrome: 설정 화면의 버튼을 북마크바로 끌어다 놓고, 이 상품 페이지에서 클릭)이나 Chrome 확장으로 기록하세요. 3회 이상 쌓이면 판정이 시작됩니다.
+            {p.site === "coupang" && <> 쿠팡은 <b>파트너스 API 키</b>(무료)를 worker/.env 에 넣으면 자동 수집됩니다.</>}
+            <div className="mt-1"><Link to="/settings" className="font-semibold underline">설정에서 북마클릿 가져오기 →</Link></div>
+          </div>
+        ) : (p.fail_count ?? 0) >= 3 && <div className="mt-2 rounded-xl bg-rose-50 dark:bg-rose-900/30 p-3 text-xs text-rose-700 dark:text-rose-200">수집이 {p.fail_count}회 연속 실패했습니다: {p.last_error}</div>}
         {p.pending_confirm && <div className="mt-2 rounded-xl bg-violet-50 dark:bg-violet-900/30 p-3 text-xs text-violet-800 dark:text-violet-200">마지막 수집값이 평소보다 40% 이상 낮아 <b>확인 대기</b> 중입니다. 다음 수집에서 같은 수준이면 알림이 나갑니다.</div>}
 
         <div className="mt-4 flex gap-2 flex-wrap">

@@ -71,3 +71,24 @@ def test_confirm_suspects_only_same_level(tmp_path):
     hist = st.history(p.id, 30)
     assert [(s.price, s.suspect) for s in hist] == [(100_000, False), (10_000, True), (100_000, False), (55_000, False)]
     assert all_time_low(hist) == 55_000
+
+
+def test_robots_block_is_manual_only_not_failure(tmp_path, monkeypatch):
+    """robots.txt 금지는 실패로 세지 않고(중단 없음), 7일에 한 번만 재확인한다."""
+    from worker import run as run_mod
+    from worker.adapters.base import AdapterError
+
+    class Blocked:
+        site = "coupang"; min_interval_hours = 0
+        def fetch(self, product):
+            raise AdapterError("robots.txt 가 자동 수집을 금지 — 북마클릿(설정 화면)으로 직접 기록하세요")
+
+    monkeypatch.setattr(run_mod, "get_adapter", lambda product: Blocked())
+    st = SqliteStorage(tmp_path / "t.db")
+    p = st.add_product(Product("", "마우스", "https://www.coupang.com/vp/products/1", "coupang", "KR", "KRW"))
+    for _ in range(12):
+        run_mod.process_product(st, st.list_products()[0], delay=0)
+    saved = st.list_products(active_only=False)[0]
+    assert saved.active and saved.fail_count == 0 and "robots.txt" in (saved.last_error or "")
+    assert not run_mod._due(saved, 0)                     # 방금 확인했으니 일주일 뒤에
+    assert st.alerts_since(None, NOW - timedelta(days=365)) == []   # paused 알림 없음

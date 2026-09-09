@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import type { ProductOverview } from "../types";
-import { COUNTRY_FLAG, SITE_LABEL, fmtPct, fmtPrice, timeAgo } from "../lib/format";
+import { COUNTRY_FLAG, SITE_LABEL, fmtPct, fmtPrice, isManualOnly, timeAgo } from "../lib/format";
 import { RISK_CLS, RISK_LABEL } from "../lib/risk";
 import { VERDICT_CLS } from "../lib/decision";
 import { trendLabel } from "../lib/trend";
@@ -25,7 +25,8 @@ function badges(p: ProductOverview, threshold: number): Array<[string, string]> 
   if (p.last_price != null && p.all_time_low != null && p.last_price <= p.all_time_low) out.push(["역대 최저", "bg-sky-100 text-sky-800 dark:bg-sky-900/50 dark:text-sky-200"]);
   const t = trendLabel(p.trend_pct);
   if (t) out.push([t, "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"]);
-  if ((p.fail_count ?? 0) >= 3) out.push([`수집 실패 ${p.fail_count}회`, "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-200"]);
+  if (isManualOnly(p.last_error)) out.push(["📌 직접 기록", "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"]);
+  else if ((p.fail_count ?? 0) >= 3) out.push([`수집 실패 ${p.fail_count}회`, "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-200"]);
   return out.slice(0, 2);
 }
 

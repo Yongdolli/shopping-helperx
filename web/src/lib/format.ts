@@ -82,4 +82,7 @@ export function parseVariant(url: string, site: string): string | null {
   } catch { return null; }
 }
 
+/** 워커 models.is_manual_only 와 동일: robots.txt 금지 = 자동 수집 불가(실패 아님) → 북마클릿/확장으로 기록 */
+export const isManualOnly = (err: string | null | undefined) => !!err && err.includes("robots.txt");
+
 export const ALERT_LABEL: Record<string, string> = { target: "목표가 도달", drop: "가격 급락", low: "역대 최저가", restock: "재입고", fake: "가짜 할인 의심", paused: "추적 자동 중단" };

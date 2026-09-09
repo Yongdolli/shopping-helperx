@@ -33,7 +33,7 @@ class Storage(Protocol):
     def list_products(self, active_only: bool = True) -> list[Product]: ...
     def add_product(self, p: Product) -> Product: ...
     def update_product(self, p: Product) -> None: ...
-    def mark_fetch(self, p: Product, error: Optional[str]) -> None: ...
+    def mark_fetch(self, p: Product, error: Optional[str], count: bool = True) -> None: ...   # count=False: 실패로 세지 않음(자동 수집 불가)
     def update_risk(self, p: Product, level: str, reasons: str) -> None: ...
     def latest_prices_by_model(self, model_no: str, currency: str, exclude_id: str) -> list[float]: ...
     def history(self, product_id: str, days: int) -> list[PriceSnapshot]: ...
@@ -137,9 +137,11 @@ class SqliteStorage:
         )
         self.conn.commit()
 
-    def mark_fetch(self, p: Product, error: Optional[str]) -> None:
+    def mark_fetch(self, p: Product, error: Optional[str], count: bool = True) -> None:
         now = _iso(datetime.now(timezone.utc))
-        if error:   # 실패도 '조회'다 — last_fetched_at 을 갱신해야 min_interval_hours 가 지켜져 차단된 사이트를 매시간 두드리지 않는다
+        if error and not count:   # robots.txt 금지 등 영구 상태: 실패 카운트 0 으로 두고 사유만 기록
+            self.conn.execute("update products set fail_count=0, last_error=?, last_fetched_at=? where id=?", (error[:300], now, p.id))
+        elif error:   # 실패도 '조회'다 — last_fetched_at 을 갱신해야 min_interval_hours 가 지켜져 차단된 사이트를 매시간 두드리지 않는다
             self.conn.execute("update products set fail_count=fail_count+1, last_error=?, last_fetched_at=? where id=?", (error[:300], now, p.id))
         else:
             self.conn.execute("update products set fail_count=0, last_error=null, last_fetched_at=? where id=?", (now, p.id))
@@ -315,9 +317,9 @@ class SupabaseStorage:
             "image_url": p.image_url, "currency": p.currency,
         }).eq("id", p.id).execute()
 
-    def mark_fetch(self, p: Product, error: Optional[str]) -> None:
+    def mark_fetch(self, p: Product, error: Optional[str], count: bool = True) -> None:
         if error:
-            self.db.table("products").update({"fail_count": p.fail_count + 1, "last_error": error[:300],
+            self.db.table("products").update({"fail_count": p.fail_count + 1 if count else 0, "last_error": error[:300],
                                               "last_fetched_at": _iso(datetime.now(timezone.utc))}).eq("id", p.id).execute()
         else:
             self.db.table("products").update({"fail_count": 0, "last_error": None,

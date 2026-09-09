@@ -50,6 +50,14 @@ VARIANT_PARAMS: dict[str, tuple[str, ...]] = {
 }
 
 
+MANUAL_ONLY_MARK = "robots.txt"
+
+
+def is_manual_only(error: Optional[str]) -> bool:
+    """영구적 '자동 수집 불가'(robots.txt 금지) — 실패로 세지 않고, 북마클릿/확장 전용으로 다룬다."""
+    return bool(error) and MANUAL_ONLY_MARK in error
+
+
 def detect_site(url: str) -> tuple[str, str, str]:
     host = (urlparse(url).hostname or "").lower()
     for domain, info in SITE_TABLE.items():

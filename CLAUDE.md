@@ -21,6 +21,7 @@ docs/       구상안·설계 문서
   다음 수집이 같은 수준(±5%)이면 `confirm_suspects(product_id, price)` 로 **그 수준의 suspect 만** 승격 후 정상 판정(`baseline.confirms_suspect`). 정상가로 돌아오면 승격하지 않고 suspect 로 남긴다(역대 최저·기준선 오염 방지).
   파싱 오류로 1/10 가격이 읽혀도 오탐 알림이 나가지 않게 하는 장치. 북마클릿 기록은 사용자가 봤으므로 제외.
 - **자동 중단**: 연속 실패 `PAUSE_AFTER_FAILS=10` 회면 `active=False` + `kind=paused` 알림. 상세에서 재개 가능.
+  **robots.txt 금지는 실패가 아님**(`models.is_manual_only` ↔ `format.isManualOnly`): fail_count 0, 중단 없음, 7일에 한 번만 재확인. 카드 배지 "📌 직접 기록", 상세는 북마클릿/확장 안내(쿠팡은 파트너스 키 안내).
 - 알림 종류 우선순위: `target`(목표가 이하) > `drop`(기준선 대비 -threshold 이상) > `low`(역대 최저 갱신) > `restock` > `fake`(가짜 할인) (+ `paused` 자동 중단).
   같은 상품·종류는 24시간에 1회, `fake` 는 7일에 1회.
 - **다이제스트** (`user_settings.digest`, 기본 true, `worker/digest.py`): 워커는 알림을 `notified=False` 로 저장만 하고 `python -m worker digest` 가 아침 08:00·점심 12:30·저녁 19:00 KST 에
