@@ -125,10 +125,18 @@ def test_coupang_source_only_with_keys(tmp_path):
     off = M.Source("coupang", "", M.parse_coupang, M.best_match, 0, fetcher=lambda q: calls.append(q) or body, budget=5, enabled=lambda: False)
     assert M.price_pending(st, sources=[off], sleep=lambda s: None) == (7, 0) and calls == []      # 키 없으면 호출 안 함
     st.conn.execute("update deals set ref_checked=0"); st.conn.commit()
-    assert M.price_pending(st, sources=[on], sleep=lambda s: None) == (7, 5) and len(calls) == 5   # 실행당 5회 예산
+    on.budget = 5
+    assert M.price_pending(st, sources=[on], sleep=lambda s: None) == (7, 5) and len(calls) == 5   # 실행당 예산
     d = [x for x in st.list_deals(NOW - timedelta(days=1)) if x.below_pct is not None][0]
     assert "쿠팡 39,900" in d.ref_name and d.ref_url == "https://link.coupang.com/a/x"
-    assert [s for s in M.SOURCES if s.name == "coupang"][0].budget == 5
+    cp = [s for s in M.SOURCES if s.name == "coupang"][0]
+    assert cp.budget == 3 and cp.fallback_only
+    # 앞 소스가 찾은 딜엔 쿠팡을 부르지 않는다
+    st.conn.execute("update deals set ref_checked=0"); st.conn.commit(); calls.clear()
+    first = M.Source("danawa", "", M.parse_danawa, M.best_match, 0, fetcher=lambda q: PAGE)
+    fb = M.Source("coupang", "", M.parse_coupang, M.best_match, 0, fetcher=lambda q: calls.append(q) or body, budget=3, fallback_only=True)
+    M.price_pending(st, sources=[first, fb], sleep=lambda s: None)
+    assert calls == []
 
 
 def test_digest_dedupes_same_deal_across_communities():

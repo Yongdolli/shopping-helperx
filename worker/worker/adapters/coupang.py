@@ -43,7 +43,7 @@ class CoupangAdapter(BaseAdapter):
     site = "coupang"
     priority = 10
     min_interval_hours = 6
-    budget_per_run = 8
+    budget_per_run = 5   # 딜 시세(market.py) 3회와 합쳐 시간당 8회 이하 — 계정당 ~10회/시간 넘으면 403·정지 위험
 
     def available(self) -> bool:
         return bool(settings.coupang_access_key and settings.coupang_secret_key)

@@ -7,7 +7,8 @@
   다나와    | 전체 쇼핑몰 현재 최저가 (옵션·색상 중 최저) | 허용, Crawl-delay 10초
   에누리    | 전체 쇼핑몰 현재 최저가 (JSON-LD lowPrice)  | 허용, 2초
   옥션      | 조건에 맞는 판매글 가격들의 중앙값 (≥3건)  | 허용, 2초
-  쿠팡      | 파트너스 Open API 검색 결과 최저가        | 공식 API, 키 있을 때만, 실행당 5회 (시간당 ~10회 제한)
+  쿠팡      | 파트너스 Open API 검색 결과 최저가        | 공식 API, 키 있을 때만, 다른 소스가 못 찾은 딜만, 실행당 3회
+            |   (계정당 시간당 ~10회 넘으면 403·정지 위험 → 추적 상품 어댑터 5회 + 딜 3회 = 8회로 공유)
   (네이버·지마켓·SSG·롯데온, 그리고 쿠팡 웹페이지는 robots 금지·차단으로 사용 불가 — 2026-09 실측)
 
 소스별 평소 가격 = 그 키의 최근 90일 관측 중앙값(오늘 포함). 딜의 평소 가격 = 소스별 평소 가격들의 중앙값.
@@ -260,13 +261,14 @@ class Source:
     fetcher: Optional[Callable[[str], str]] = None      # 검색어 → 응답 본문 (API 소스)
     budget: int = 0                                     # 실행당 호출 상한 (0 = 무제한)
     enabled: Callable[[], bool] = lambda: True
+    fallback_only: bool = False                         # 앞 소스들이 아무것도 못 찾은 딜에만 호출 (호출 절약)
 
 
 SOURCES: list[Source] = [
     Source("danawa", "https://search.danawa.com/dsearch.php", parse_danawa, best_match, 10.0, "query"),
     Source("enuri", "https://www.enuri.com/search.jsp", parse_enuri, best_match, 2.0, "keyword"),
     Source("auction", "https://browse.auction.co.kr/search", parse_auction, listing_median, 2.0, "keyword"),
-    Source("coupang", "https://api-gateway.coupang.com", parse_coupang, best_match, 6.0, fetcher=_coupang_search, budget=5,
+    Source("coupang", "https://api-gateway.coupang.com", parse_coupang, best_match, 6.0, fetcher=_coupang_search, budget=3, fallback_only=True,
            enabled=lambda: bool(settings.coupang_access_key and settings.coupang_secret_key)),
 ]
 
@@ -311,6 +313,8 @@ def price_pending(store, limit: int = PRICE_PER_RUN, sources: Optional[list[Sour
         if d.price and q:
             for src in sources:
                 if src.budget and used.get(src.name, 0) >= src.budget:
+                    continue
+                if src.fallback_only and found:
                     continue
                 used[src.name] = used.get(src.name, 0) + 1
                 wait = src.delay - (time.monotonic() - last.get(src.name, -1e9))
