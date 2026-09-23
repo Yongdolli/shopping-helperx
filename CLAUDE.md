@@ -8,7 +8,7 @@
 ```
 web/        React + Vite + TS + Tailwind v4 + Zustand PWA (사용자 화면, src/sw.ts 서비스워커 = 웹푸시 수신)
 worker/     Python 수집 워커: 어댑터 → 스냅샷 저장 → 기준선 계산 → 알림 판정 → 발송(푸시·텔레그램·이메일) + 주간 리포트(report.py) + 딜 피드(deals.py)
-supabase/   DB 마이그레이션 SQL (001 초기, 002 옵션·푸시·정가, 003 수동 기록 RLS, 004 정품 리스크, 005 극단값 확인·관세 카테고리, 006 목표가·구매·태그, 007 다이제스트·목표가 즉시, 008 upsert 키 수정, 009 가족 공유, 010 딜 피드, 011 시세·평소 가격)
+supabase/   DB 마이그레이션 SQL (001 초기, 002 옵션·푸시·정가, 003 수동 기록 RLS, 004 정품 리스크, 005 극단값 확인·관세 카테고리, 006 목표가·구매·태그, 007 다이제스트·목표가 즉시, 008 upsert 키 수정, 009 가족 공유, 010 딜 피드, 011 시세·평소 가격, 012 보낸 딜 기록)
 extension/  Chrome 확장(MV3) — 북마클릿과 같은 추출 로직을 build.mjs 가 content.js 로 생성. 원클릭 가격 기록
 github-workflows/  GitHub Actions 크론: collect.yml(매시) · daily-digest.yml(08:00·12:30·19:00 KST) · weekly-report.yml(월요일 09:00 KST). push-to-github.cmd 가 .github/workflows/ 로 옮김
 docs/       구상안·설계 문서
@@ -30,17 +30,18 @@ docs/       구상안·설계 문서
 - **딜 피드** (`worker/deals.py`, `deals` 공용 테이블 010, 웹 `/deals` 탭): 등록하지 않은 상품까지 "모든 사이트"의 할인을 보는 기능. 사이트 전체 크롤링은 불가능하므로
   **핫딜 커뮤니티**(뽐뿌 RSS·루리웹 RSS·클리앙·퀘이사존·에펨코리아)를 매시간 읽어 `[사이트] 상품명 (가격/배송)` 을 파싱(`parse_title`). 게시글 URL 로 중복 제거, 7일 보관, robots 준수, 소스별 실패 격리.
   `pct` 는 제목에 'N%'·'반값' 이 있을 때만 (커뮤니티 글은 대개 가격만). 사용자 설정 `deal_min_pct`(기본 30)·`deal_keywords` — 다이제스트에 키워드 일치 → pct≥min 순으로 최대 10건 포함(`pick_for_digest`),
-  알림이 없어도 딜이 있으면 다이제스트 발송. **보강(enrich)**: 새 딜은 실행당 25건씩 게시글을 열어 상점 링크(`shop_url`, 리다이렉트·단축링크 해제)를 찾고, 봇 차단 아닌 상점이면 JSON-LD 로
+  알림이 없어도 딜이 있으면 다이제스트 발송. **딜은 최근 24시간 중 아직 안 보낸 것만**(012 `deal_sends`, 키 = `deals.same_key` 제목+가격 ↔ 웹 `types.dealKey`) — 슬롯 창 겹침·구멍 없음, 여러 커뮤니티의 같은 딜은 1건. **보강(enrich)**: 새 딜은 실행당 25건씩 게시글을 열어 상점 링크(`shop_url`, 리다이렉트·단축링크 해제)를 찾고, 봇 차단 아닌 상점이면 JSON-LD 로
   정가/표시가를 읽어 딜 가격이 더 싸면 `list_price`·`pct` 를 채운다(실측: 링크 72%, 할인율은 소수). `shop_url` 이 있으면 웹 딜 탭에서 원클릭 추적, 없으면 `/add?title=` 로 보내 상점 URL 을 붙여넣게 한다. 공식 API 딜(쿠팡 골드박스·11번가 쇼킹딜·BestBuy onSale)은 키가 생기면 소스로 추가.
 - **평소보다 싼 딜** (`worker/market.py`, 011 `market_prices` + deals.ref_price/ref_name/ref_url/below_pct/ref_checked): 새 딜(3일 이내, 가격 있음)을 실행당 15건,
-  **3개 소스**에서 같은 상품을 찾는다 — 다나와(전체 쇼핑몰 최저가, Crawl-delay 10초) · 에누리(JSON-LD lowPrice, 2초) · 옥션(맞는 판매글 ≥3건의 가격 중앙값, 2초).
+  소스에서 같은 상품을 찾는다 — 다나와(전체 쇼핑몰 최저가, Crawl-delay 10초) · 에누리(JSON-LD lowPrice, 2초) · 옥션(맞는 판매글 ≥3건의 가격 중앙값, 2초)
+  · 쿠팡(파트너스 API, 키 있을 때만, 실행당 5회). 모든 소스가 응답 실패면 ref_checked 를 두지 않아 다음 실행에서 재시도. 해외 통화 상점 가격은 원화 딜과 비교 안 함.
   네이버·쿠팡·지마켓·SSG·롯데온은 robots 금지/차단으로 불가(2026-09 실측). 관측은 `market_prices`(pcode 열 = "<소스>:<id>")에 쌓고, 소스별 평소 가격 = 90일 관측 중앙값,
   딜의 평소 가격 = 소스별 평소 가격의 중앙값, ref_name 에 근거("다나와 38,900 · 에누리 41,000 · 옥션 45,000"). below_pct = (평소−딜)/평소.
   매칭 안전장치: 점수 0.7×딜토큰 포함률 + 0.3×후보토큰 포함률 ≥ 0.5, 모델명 토큰 정확 일치(G304≠G304rWH), 병행/해외/비공식/중고는 딜도 그럴 때만,
   **수량 가드**(개수·용량·무게가 둘 다 있으면 같은 값 필요: 48팩≠24개), 가격비 0.35~1.3, 최고점−0.1 안에서 가장 싼 후보(보수적). 소스별 실패 격리·1회 재시도.
   판단 할인율 = below_pct 우선, 없으면 pct (`Deal.effective_pct` ↔ `types.effectivePct`). 웹 딜 탭 기본 = "평소보다 N%↑ 싼 것", `deal_min_pct` 기본 10.
   실측 매칭률: 다나와만 10% → 3소스 70%(20건 중 14건, 2026-09-24).
-- **스케줄러**: GitHub Actions(저장소 Public → 무료 무제한, 주 스케줄러; 무료 크론은 가끔 건너뜀) + PC 보조 수집 `worker/setup-scheduler.ps1`(작업 스케줄러: 매시 17분 collect, 08:00·12:30·19:00 digest, 월 09:00 report, 로그 worker/data/scheduler.log). PC 쪽 digest·report 작업은 Disabled(중복 발송 방지), collect 만 보조로 켜 둠.
+- **스케줄러**: GitHub Actions(저장소 Public → 무료 무제한, 주 스케줄러, 매시 :17; 무료 크론은 가끔 건너뜀) + PC 보조 수집(매시 :47 — 동시 실행 방지) `worker/setup-scheduler.ps1`(작업 스케줄러: 매시 17분 collect, 08:00·12:30·19:00 digest, 월 09:00 report, 로그 worker/data/scheduler.log). PC 쪽 digest·report 는 `-WithDigest` 없이 등록하면 Disabled(중복 발송 방지).
 - **가족 공유** (`shares` 테이블, 009): 태그(또는 전체) 단위 읽기 전용 링크 `/s/<token>`. 로그인 없이 열리며 `shared_info/shared_products/shared_snapshots` security definer RPC 로만 읽는다
   (anon 은 테이블 직접 접근 불가, 토큰 12바이트 난수). 웹은 받은 상품·스냅샷으로 `overview/enrich` 를 그대로 돌려 카드를 만든다(임계값 10%, 90일). 구매 완료·비활성 상품 제외. 데모 모드는 같은 브라우저에서만.
 - **가짜 할인** = 사이트 표시 할인율(정가 대비) ≥ 20% 인데 실제(기준선 대비) ≤ 3%. `baseline.is_fake_discount`.

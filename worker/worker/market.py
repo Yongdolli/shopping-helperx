@@ -305,8 +305,8 @@ def price_pending(store, limit: int = PRICE_PER_RUN, sources: Optional[list[Sour
     todo = store.deals_to_price(limit)
     matched = 0
     for d in todo:
-        d.ref_checked = True
         q = query_of(d.title)
+        fetched = 0                                                         # 응답을 받은 소스 수 — 0 이면(네트워크 끊김) 다음 실행에서 재시도
         found: list[tuple[Source, Candidate, float, float]] = []          # (소스, 후보, 점수, 소스별 평소 가격)
         if d.price and q:
             for src in sources:
@@ -318,7 +318,9 @@ def price_pending(store, limit: int = PRICE_PER_RUN, sources: Optional[list[Sour
                     sleep(wait)
                 last[src.name] = time.monotonic()
                 try:
-                    hit = src.pick(d.title, d.price, src.parse(fetch(src, q)))
+                    body = fetch(src, q)
+                    fetched += 1
+                    hit = src.pick(d.title, d.price, src.parse(body))
                 except Exception as e:  # noqa: BLE001 — 한 소스 실패가 다른 소스를 막지 않는다
                     log.debug("시세 조회 실패 %s %s: %s", src.name, q, str(e)[:80])
                     continue
@@ -329,6 +331,10 @@ def price_pending(store, limit: int = PRICE_PER_RUN, sources: Optional[list[Sour
                 hist = store.market_history(key, USUAL_DAYS)
                 store.add_market_price(key, c.name, c.price)
                 found.append((src, c, score, usual_price(hist, c.price)))
+        if not (d.price and q) or fetched or found:
+            d.ref_checked = True
+        elif not d.ref_checked:
+            continue                                                        # 모든 소스 실패: 저장하지 않고 다음에 다시
         if found:
             usual = float(median(u for *_, u in found))
             best = max(found, key=lambda f: (f[2], f[0].name != "auction"))    # 점수 높은 것, 같으면 가격비교 사이트

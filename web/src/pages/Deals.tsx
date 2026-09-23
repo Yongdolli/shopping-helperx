@@ -96,7 +96,7 @@ export default function Deals() {
                     {d.below_pct != null && d.ref_price != null ? (
                       <a href={d.ref_url ?? undefined} target="_blank" rel="noreferrer" title={`비교 상품: ${d.ref_name ?? ""}`}
                         className={`rounded-full px-2 py-0.5 text-[11px] ${d.below_pct >= minPct ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200" : d.below_pct > 0 ? "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" : "bg-rose-50 text-rose-600 dark:bg-rose-900/40 dark:text-rose-200"}`}>
-                        평소 {fmtPrice(d.ref_price, d.currency)} {d.below_pct > 0 ? `대비 ▼${d.below_pct}%` : "보다 비쌈"}
+                        평소 {fmtPrice(d.ref_price, d.currency)} {d.below_pct > 0 ? `대비 ▼${d.below_pct}%` : d.below_pct < 0 ? "보다 비쌈" : "수준"}
                       </a>
                     ) : d.pct != null && <span className={`rounded-full px-2 py-0.5 text-[11px] ${d.pct >= minPct ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"}`}>{d.list_price ? `정가 ${fmtPrice(d.list_price, d.currency)} 대비` : "표시"} ▼{d.pct}%</span>}
                     {kw && <span className="rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200 px-2 py-0.5 text-[11px]">#{kw}</span>}

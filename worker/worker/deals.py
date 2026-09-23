@@ -211,7 +211,7 @@ def fetch_clien(now: datetime) -> list[Deal]:
 def fetch_quasarzone(now: datetime) -> list[Deal]:
     page = _get("https://quasarzone.com/bbs/qb_saleinfo")
     out = []
-    links = list(re.finditer(r'<a href="(/bbs/qb_(?:partner)?saleinfo/views/\d+)" class="subject-link"[^>]*>(.*?)</a>', page, re.S))
+    links = list(re.finditer(r'<a href="(/bbs/qb_(?:partner)?saleinfo/views/\d+)"\s+class="subject-link\s*"[^>]*>(.*?)</a>', page, re.S))
     for i, m in enumerate(links):
         href, title = m.group(1), re.sub(r"<[^>]+>", "", m.group(2))
         rest = page[m.end(): links[i + 1].start() if i + 1 < len(links) else m.end() + 4000]
@@ -344,7 +344,7 @@ def enrich(deal: Deal, get: Callable[[str], str] = None, resolve: Callable[[str]
     except Exception as e:  # noqa: BLE001
         log.debug("상점 페이지 실패 %s: %s", shop, str(e)[:80])
         return deal
-    if not q:
+    if not q or (q.currency or "KRW").upper() != (deal.currency or "KRW").upper():   # 해외 상점(USD 등) 가격은 원화 딜과 비교하지 않음
         return deal
     if deal.price is None and q.price:
         deal.price = q.price
@@ -417,7 +417,8 @@ def fmt_deal(d: Deal) -> str:
     price = f"{d.price:,.0f}원" if d.price else "가격 미상"
     ship = f" / {d.shipping}" if d.shipping else ""
     if d.below_pct is not None and d.ref_price:
-        pct = f" (평소 {d.ref_price:,.0f}원 대비 ▼{d.below_pct:.0f}%)"
+        b = d.below_pct
+        pct = f" (평소 {d.ref_price:,.0f}원 대비 ▼{b:.0f}%)" if b > 0 else f" (평소 {d.ref_price:,.0f}원{'보다 비쌈' if b < 0 else ' 수준'})"
     else:
         pct = f" ▼{d.pct:.0f}%" if d.pct is not None else ""
     return f"[{d.site_label or d.site}] {d.title} — {price}{ship}{pct}"

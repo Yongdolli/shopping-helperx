@@ -61,6 +61,8 @@ class Storage(Protocol):
     def deals_to_price(self, limit: int) -> list[Deal]: ...       # 시세 확인 안 된 최근(3일) 가격 있는 딜
     def market_history(self, pcode: str, days: int) -> list[float]: ...
     def add_market_price(self, pcode: str, name: str, price: float) -> None: ...
+    def sent_deal_keys(self, user_id: Optional[str], since: datetime) -> Optional[set[str]]: ...   # None = 기록 불가(012 전)
+    def mark_deals_sent(self, user_id: Optional[str], keys: list[str]) -> None: ...
 
 
 # ---------------------------------------------------------------- SQLite
@@ -98,6 +100,9 @@ create table if not exists deals (
   price real, currency text not null default 'KRW', shipping text, pct real, image_url text, category text,
   posted_at text not null, fetched_at text not null, shop_url text, list_price real, enriched integer not null default 0,
   ref_price real, ref_name text, ref_url text, below_pct real, ref_checked integer not null default 0
+);
+create table if not exists deal_sends (
+  user_key text not null, deal_key text not null, sent_at text not null, primary key (user_key, deal_key)
 );
 create table if not exists market_prices (
   id integer primary key autoincrement, pcode text not null, name text, price real not null, captured_at text not null
@@ -295,6 +300,15 @@ class SqliteStorage:
                           (pcode, name, price, _iso(datetime.now(timezone.utc))))
         self.conn.commit()
 
+    def sent_deal_keys(self, user_id: Optional[str], since: datetime) -> Optional[set[str]]:
+        rows = self.conn.execute("select deal_key from deal_sends where user_key=? and sent_at>=?", (user_id or "local", _iso(since)))
+        return {r["deal_key"] for r in rows}
+
+    def mark_deals_sent(self, user_id: Optional[str], keys: list[str]) -> None:
+        now = _iso(datetime.now(timezone.utc))
+        self.conn.executemany("insert or replace into deal_sends(user_key,deal_key,sent_at) values(?,?,?)", [(user_id or "local", k, now) for k in keys])
+        self.conn.commit()
+
     @staticmethod
     def _row_to_deal(r: sqlite3.Row) -> Deal:
         return Deal(r["url"], r["source"], r["site"], r["site_label"] or "", r["title"], r["price"], r["currency"], r["shipping"],
@@ -485,6 +499,24 @@ class SupabaseStorage:
 
     def add_market_price(self, pcode: str, name: str, price: float) -> None:
         self.db.table("market_prices").insert({"pcode": pcode, "name": name, "price": price}).execute()
+
+    def sent_deal_keys(self, user_id: Optional[str], since: datetime) -> Optional[set[str]]:
+        try:
+            rows = (self.db.table("deal_sends").select("deal_key").eq("user_key", user_id or "local")
+                    .gte("sent_at", _iso(since)).limit(5000).execute().data)
+        except Exception as e:  # noqa: BLE001 — 012 마이그레이션 전
+            log.warning("보낸 딜 기록 없음 (012_deal_sends.sql 실행 필요): %s", str(e)[:80])
+            return None
+        return {r["deal_key"] for r in rows}
+
+    def mark_deals_sent(self, user_id: Optional[str], keys: list[str]) -> None:
+        if not keys:
+            return
+        try:
+            self.db.table("deal_sends").upsert([{"user_key": user_id or "local", "deal_key": k} for k in keys],
+                                               on_conflict="user_key,deal_key").execute()
+        except Exception as e:  # noqa: BLE001
+            log.warning("보낸 딜 기록 실패: %s", str(e)[:80])
 
     @staticmethod
     def _to_deal(r: dict) -> Deal:

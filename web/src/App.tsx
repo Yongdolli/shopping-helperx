@@ -14,6 +14,14 @@ import SharedView from "./pages/SharedView";
 import { AUTO_LOGIN, api, supabase } from "./lib/api";
 import { useStore } from "./store";
 
+// 기기별 로그인 링크(#login=…)는 모듈 로드 즉시 주소창에서 지운다 (세션 조회를 기다리는 동안 노출되지 않게)
+const LINK_PW = (() => {
+  const m = location.hash.match(/(?:^#|&)login=([^&]+)/);
+  if (!m) return "";
+  history.replaceState(null, "", location.pathname + location.search);
+  return decodeURIComponent(m[1]);
+})();
+
 export default function App() {
   const refresh = useStore((s) => s.refresh);
   const [authed, setAuthed] = useState<boolean | null>(api.mode === "demo" ? true : null);
@@ -23,14 +31,15 @@ export default function App() {
     if (!supabase) return;
     supabase.auth.getSession().then(async ({ data }) => {
       // 기기별 로그인 링크: https://…/#login=<비밀번호> 를 한 번 열면 로그인 후 주소에서 지운다. 세션은 이 기기에 유지된다.
-      const m = location.hash.match(/(?:^#|&)login=([^&]+)/);
-      const linkPw = m ? decodeURIComponent(m[1]) : "";
-      if (m) history.replaceState(null, "", location.pathname + location.search);
+      const linkPw = LINK_PW;
       if (data.session && !linkPw) { setAuthed(true); return; }
       const pw = linkPw || AUTO_LOGIN.password;           // 로컬 개발은 .env.local 의 VITE_LOGIN_PASSWORD
       if (AUTO_LOGIN.email && pw) {
         try { await api.signInWithPassword(AUTO_LOGIN.email, pw); return; }
-        catch (e) { setAutoErr((e as Error).message); }
+        catch (e) {
+          if (data.session) { setAuthed(true); return; }     // 옛 링크여도 이미 로그인된 기기는 그대로
+          setAutoErr((e as Error).message);
+        }
       }
       setAuthed(false);
     });

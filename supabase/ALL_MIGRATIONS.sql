@@ -1,4 +1,4 @@
--- Shopping Helper 전체 마이그레이션 (001~011) — 새 프로젝트에 한 번에 붙여넣기용. 개별 파일과 내용 동일.
+-- Shopping Helper 전체 마이그레이션 (001~012) — 새 프로젝트에 한 번에 붙여넣기용. 개별 파일과 내용 동일.
 -- 재실행해도 안전(멱등): 어느 단계에서 실패했든 전체를 다시 Run 하면 된다.
 
 -- ==================== 001_init.sql ====================
@@ -365,3 +365,14 @@ create policy "market readable" on market_prices for select to authenticated usi
 -- "평소보다 N% 이상 싸면" 기본 10% (핵심 규칙과 동일). 기존에 30 으로 저장된 기본값도 10 으로.
 alter table user_settings alter column deal_min_pct set default 10;
 update user_settings set deal_min_pct = 10 where deal_min_pct = 30;
+
+-- ==================== 012_deal_sends.sql ====================
+-- v1.0 수정: 다이제스트가 같은 딜을 두 번 보내거나(창 겹침) 저녁 딜을 빠뜨리지(창 구멍) 않도록, 보낸 딜을 기록한다.
+-- 다이제스트는 최근 24시간 딜 중 아직 안 보낸 것만 고른다(늦게 시세가 확인된 딜도 다음 슬롯에 포함). 워커만 읽고 쓴다(service key).
+create table if not exists deal_sends (
+  user_key  text not null,                 -- user_id (로컬 SQLite 는 'local')
+  deal_key  text not null,                 -- deals.same_key: 제목 글자 + 가격 (여러 커뮤니티의 같은 딜 = 같은 키)
+  sent_at   timestamptz not null default now(),
+  primary key (user_key, deal_key)
+);
+alter table deal_sends enable row level security;   -- 정책 없음 = 웹(anon/authenticated) 접근 불가

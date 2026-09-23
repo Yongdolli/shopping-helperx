@@ -8,7 +8,7 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from .deals import fmt_deal, pick_for_digest
+from .deals import fmt_deal, pick_for_digest, same_key
 from .models import Alert, Deal, Product
 from .notify import KIND_LABEL, render, send_email, send_push, send_telegram
 from .storage import Storage
@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 KST = timezone(timedelta(hours=9))
 KIND_ORDER = ["target", "drop", "low", "restock", "fake", "paused"]
 MAX_PER_KIND = 8
+SLOT_GAP_HOURS = 6.5   # 012 전 대체 창 (08:00→12:30 4.5h, 12:30→19:00 6.5h)
 
 
 def slot_label(now: Optional[datetime] = None) -> str:
@@ -72,13 +73,18 @@ def run_digest(store: Storage, dry_run: bool = False, now: Optional[datetime] = 
     for p in products.values():
         by_user.setdefault(p.user_id, []).append(p)
     now_ = now or datetime.now(timezone.utc)
-    recent_deals = store.list_deals(now_ - timedelta(hours=9))   # 직전 다이제스트 이후 올라온 딜
+    # 최근 24시간 딜 중 아직 이 사용자에게 안 보낸 것 (창 겹침·구멍 없음, 늦게 시세 확인된 딜도 다음 슬롯에 포함).
+    # 보낸 기록(012)이 없으면 직전 슬롯 간격(최대 13시간)으로 대체.
+    recent_deals = store.list_deals(now_ - timedelta(hours=24))
     n = 0
     for uid in by_user:
         pending = store.pending_alerts(uid)
         us = store.settings_for(uid)
         keywords = [k for k in (us.deal_keywords or "").split(",") if k.strip()]
-        picks = pick_for_digest(recent_deals, keywords, us.deal_min_pct)
+        sent_keys = store.sent_deal_keys(uid, now_ - timedelta(days=3))
+        pool = ([d for d in recent_deals if same_key(d) not in sent_keys] if sent_keys is not None
+                else [d for d in recent_deals if d.posted_at >= now_ - timedelta(hours=SLOT_GAP_HOURS)])
+        picks = pick_for_digest(pool, keywords, us.deal_min_pct)
         if not pending and not picks:
             continue
         title, body, line = render_digest(pending, products, now, picks)
@@ -98,6 +104,7 @@ def run_digest(store: Storage, dry_run: bool = False, now: Optional[datetime] = 
         if us.notify_email and send_email(title, body, us.email):
             sent.append("email")
         store.mark_notified([a.id for a in pending if a.id is not None])
+        store.mark_deals_sent(uid, [same_key(d) for d, _ in picks])
         log.info("다이제스트 user=%s 알림 %d건·딜 %d건 발송=%s", uid or "local", len(pending), len(picks), sent or "채널 없음(앱 내)")
         n += 1
     return n
