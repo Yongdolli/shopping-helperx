@@ -32,11 +32,15 @@ docs/       구상안·설계 문서
   `pct` 는 제목에 'N%'·'반값' 이 있을 때만 (커뮤니티 글은 대개 가격만). 사용자 설정 `deal_min_pct`(기본 30)·`deal_keywords` — 다이제스트에 키워드 일치 → pct≥min 순으로 최대 10건 포함(`pick_for_digest`),
   알림이 없어도 딜이 있으면 다이제스트 발송. **보강(enrich)**: 새 딜은 실행당 25건씩 게시글을 열어 상점 링크(`shop_url`, 리다이렉트·단축링크 해제)를 찾고, 봇 차단 아닌 상점이면 JSON-LD 로
   정가/표시가를 읽어 딜 가격이 더 싸면 `list_price`·`pct` 를 채운다(실측: 링크 72%, 할인율은 소수). `shop_url` 이 있으면 웹 딜 탭에서 원클릭 추적, 없으면 `/add?title=` 로 보내 상점 URL 을 붙여넣게 한다. 공식 API 딜(쿠팡 골드박스·11번가 쇼킹딜·BestBuy onSale)은 키가 생기면 소스로 추가.
-- **평소보다 싼 딜** (`worker/market.py`, 011 `market_prices` + deals.ref_price/below_pct/ref_checked): 새 딜(3일 이내, 가격 있음)을 실행당 15건 다나와 검색(robots 허용, Crawl-delay 10초)으로 매칭 →
-  상품 블록(`productItem<pcode>`)의 옵션별 최저가 = 전체 쇼핑몰 현재 최저가를 `market_prices` 에 적재, **평소 가격 = 그 pcode 90일 관측 중앙값**, below_pct = (평소−딜)/평소.
-  매칭 안전장치: 점수 0.7×딜토큰 포함률 + 0.3×후보토큰 포함률 ≥ 0.5, 모델명 토큰 정확 일치(G304≠G304rWH), 병행/해외/비공식/중고는 딜도 그럴 때만, 가격비 0.35~1.3, 최고점−0.1 안에서 가장 싼 후보(보수적).
-  판단 할인율 = below_pct 우선, 없으면 pct (`Deal.effective_pct` ↔ `types.effectivePct`). 웹 딜 탭 기본 = "평소보다 N%↑ 싼 것", `deal_min_pct` 기본 10. 실측 매칭률 약 10%(식품·가전 위주, 패션·게임은 다나와에 적음).
-- **스케줄러**: GitHub Actions(비공개 저장소는 계정 결제 상태에 좌우) 또는 PC `worker/setup-scheduler.ps1`(작업 스케줄러: 매시 17분 collect, 08:00·12:30·19:00 digest, 월 09:00 report, 로그 worker/data/scheduler.log). 둘 다 켜면 딜 다이제스트가 중복될 수 있으니 하나만.
+- **평소보다 싼 딜** (`worker/market.py`, 011 `market_prices` + deals.ref_price/ref_name/ref_url/below_pct/ref_checked): 새 딜(3일 이내, 가격 있음)을 실행당 15건,
+  **3개 소스**에서 같은 상품을 찾는다 — 다나와(전체 쇼핑몰 최저가, Crawl-delay 10초) · 에누리(JSON-LD lowPrice, 2초) · 옥션(맞는 판매글 ≥3건의 가격 중앙값, 2초).
+  네이버·쿠팡·지마켓·SSG·롯데온은 robots 금지/차단으로 불가(2026-09 실측). 관측은 `market_prices`(pcode 열 = "<소스>:<id>")에 쌓고, 소스별 평소 가격 = 90일 관측 중앙값,
+  딜의 평소 가격 = 소스별 평소 가격의 중앙값, ref_name 에 근거("다나와 38,900 · 에누리 41,000 · 옥션 45,000"). below_pct = (평소−딜)/평소.
+  매칭 안전장치: 점수 0.7×딜토큰 포함률 + 0.3×후보토큰 포함률 ≥ 0.5, 모델명 토큰 정확 일치(G304≠G304rWH), 병행/해외/비공식/중고는 딜도 그럴 때만,
+  **수량 가드**(개수·용량·무게가 둘 다 있으면 같은 값 필요: 48팩≠24개), 가격비 0.35~1.3, 최고점−0.1 안에서 가장 싼 후보(보수적). 소스별 실패 격리·1회 재시도.
+  판단 할인율 = below_pct 우선, 없으면 pct (`Deal.effective_pct` ↔ `types.effectivePct`). 웹 딜 탭 기본 = "평소보다 N%↑ 싼 것", `deal_min_pct` 기본 10.
+  실측 매칭률: 다나와만 10% → 3소스 70%(20건 중 14건, 2026-09-24).
+- **스케줄러**: GitHub Actions(저장소 Public → 무료 무제한, 주 스케줄러; 무료 크론은 가끔 건너뜀) + PC 보조 수집 `worker/setup-scheduler.ps1`(작업 스케줄러: 매시 17분 collect, 08:00·12:30·19:00 digest, 월 09:00 report, 로그 worker/data/scheduler.log). PC 쪽 digest·report 작업은 Disabled(중복 발송 방지), collect 만 보조로 켜 둠.
 - **가족 공유** (`shares` 테이블, 009): 태그(또는 전체) 단위 읽기 전용 링크 `/s/<token>`. 로그인 없이 열리며 `shared_info/shared_products/shared_snapshots` security definer RPC 로만 읽는다
   (anon 은 테이블 직접 접근 불가, 토큰 12바이트 난수). 웹은 받은 상품·스냅샷으로 `overview/enrich` 를 그대로 돌려 카드를 만든다(임계값 10%, 90일). 구매 완료·비활성 상품 제외. 데모 모드는 같은 브라우저에서만.
 - **가짜 할인** = 사이트 표시 할인율(정가 대비) ≥ 20% 인데 실제(기준선 대비) ≤ 3%. `baseline.is_fake_discount`.

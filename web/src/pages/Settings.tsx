@@ -95,7 +95,7 @@ export default function Settings() {
       <section className="card p-4 md:p-6 space-y-4">
         <h2 className="font-semibold">🔥 딜 필터</h2>
         <p className="text-xs text-slate-500">핫딜 커뮤니티 5곳(뽐뿌·루리웹·클리앙·퀘이사존·에펨코리아)에서 매시간 모은 딜 중, 아래 조건에 맞는 것을 딜 탭에서 강조하고 아침·점심·저녁 다이제스트에 넣습니다.</p>
-        <Field label={`평소보다 ${s.deal_min_pct ?? 10}% 이상 싸면`} hint="평소 가격(다나와 시세 중앙값) 대비. 시세를 못 찾은 딜은 게시글에 적힌 할인율로 판단">
+        <Field label={`평소보다 ${s.deal_min_pct ?? 10}% 이상 싸면`} hint="평소 가격(다나와·에누리·옥션 시세 중앙값) 대비. 시세를 못 찾은 딜은 게시글에 적힌 할인율로 판단">
           <input type="range" min={5} max={60} step={5} value={s.deal_min_pct ?? 10} onChange={(e) => set("deal_min_pct", Number(e.target.value))} className="w-full accent-sky-600" />
         </Field>
         <Field label="관심 키워드" hint="쉼표로 구분. 제목에 포함되면 할인율이 없어도 알려줍니다 (예: 마우스, 헤드폰, 로봇청소기)">

@@ -1,13 +1,19 @@
-"""시세(평소 가격) — 딜이 '평소보다 정말 싼지' 판단하는 기준가.
+"""시세(평소 가격) — 딜이 '평소보다 정말 싼지' 판단하는 기준가. 여러 사이트에서 같은 상품을 찾아 비교한다.
 
-커뮤니티 딜은 가격만 있고 비교 기준이 없다. 그래서 새 딜마다 다나와 검색으로 같은 상품을 찾아
-**전체 쇼핑몰 현재 최저가**를 관측하고 `market_prices` 에 쌓는다. 평소 가격 = 그 상품(pcode)의 최근 90일 관측 중앙값
-(처음엔 관측 1건 = 오늘 최저가, 쌓일수록 진짜 평소 가격). below_pct = (평소 가격 − 딜 가격) / 평소 가격.
+커뮤니티 딜은 가격만 있고 비교 기준이 없다. 그래서 새 딜마다 아래 소스에서 같은 상품을 찾아 시세를 관측하고
+`market_prices`(key = "<소스>:<상품 id>")에 쌓는다.
 
-- search.danawa.com/dsearch.php 는 robots 허용, Crawl-delay 10 → 요청 간 10초. 실행당 PRICE_PER_RUN 건.
-- 가격 이력 그래프(/info/ajax/)는 robots 금지라 쓰지 않는다.
-- 오매칭 방지: 제목 토큰 겹침 점수 ≥ MIN_SCORE, 모델명 토큰(숫자+영문)이 있으면 반드시 일치,
-  병행/해외/중고/리퍼 등은 딜 제목에도 있을 때만, 딜 가격이 기준가의 35%~130% 범위일 때만(수량·세트 차이 배제).
+  소스      | 값                                   | robots / 간격
+  다나와    | 전체 쇼핑몰 현재 최저가 (옵션·색상 중 최저) | 허용, Crawl-delay 10초
+  에누리    | 전체 쇼핑몰 현재 최저가 (JSON-LD lowPrice)  | 허용, 2초
+  옥션      | 조건에 맞는 판매글 가격들의 중앙값 (≥3건)  | 허용, 2초
+  (네이버·쿠팡·지마켓·SSG·롯데온은 robots 금지·차단으로 사용 불가 — 2026-09 실측)
+
+소스별 평소 가격 = 그 키의 최근 90일 관측 중앙값(오늘 포함). 딜의 평소 가격 = 소스별 평소 가격들의 중앙값.
+below_pct = (평소 가격 − 딜 가격) / 평소 가격. ref_name 에 근거("다나와 38,900 · 에누리 46,270 · 옥션 48,730")를 붙인다.
+
+오매칭 방지: 제목 토큰 점수 ≥ MIN_SCORE, 모델명 토큰은 정확 일치(G304 ≠ G304rWH), 병행/해외/비공식/중고 등은 딜도 그럴 때만,
+개수·용량·무게가 둘 다 적혀 있으면 일치(48팩≠24개), 딜 가격이 기준가의 35%~130%, 최고점 −0.1 안의 후보 중 가장 싼 것(보수적).
 """
 from __future__ import annotations
 
@@ -27,17 +33,36 @@ from .robots import allowed
 
 log = logging.getLogger(__name__)
 
-SEARCH_URL = "https://search.danawa.com/dsearch.php"
-CRAWL_DELAY = 10.0
 PRICE_PER_RUN = 15
 USUAL_DAYS = 90
 MIN_SCORE = 0.5
 RATIO_MIN, RATIO_MAX = 0.35, 1.30
+AUCTION_MIN_LISTINGS = 3
 
 STOP = {"특가", "할인", "무료", "무배", "배송", "무료배송", "정품", "공식", "최저가", "역대가", "역대", "역대최저", "핫딜", "쿠폰", "적용", "카드",
-        "행사", "단독", "한정", "세일", "모음", "외", "및", "사은품", "증정", "추가", "선착순", "타임딜", "오늘", "특가전", "기획", "new", "신상"}
+        "행사", "단독", "한정", "세일", "모음", "외", "및", "사은품", "증정", "추가", "선착순", "타임딜", "오늘", "특가전", "기획", "new", "신상",
+        "당일발송", "당일출고", "국내발송", "인증점", "공식인증", "판매점"}
 CAUTION = ("병행", "해외", "직구", "비공식", "중고", "리퍼", "벌크", "호환", "렌탈", "대여")
 MODEL_RE = re.compile(r"^(?=.*\d)(?=.*[a-z])[a-z0-9\-]{3,}$")
+LABEL = {"danawa": "다나와", "enuri": "에누리", "auction": "옥션"}
+
+# 수량 가드: 개수·용량·무게가 둘 다 적혀 있으면 같은 값이 하나는 있어야 한다 (48팩 ≠ 24개, 64봉 ≠ 16봉)
+QTY_RE = re.compile(r"(?:x|×|\*)\s*(\d+)|(\d+(?:\.\d+)?)\s*(개입|개|팩|입|병|캔|봉|매|구|롤|ea|kg|g|ml|l|리터)(?![a-z가-힣])")
+QTY_UNIT = {"개입": ("n", 1), "개": ("n", 1), "팩": ("n", 1), "입": ("n", 1), "병": ("n", 1), "캔": ("n", 1), "봉": ("n", 1), "매": ("n", 1),
+            "구": ("n", 1), "롤": ("n", 1), "ea": ("n", 1), "kg": ("g", 1000), "g": ("g", 1), "ml": ("ml", 1), "l": ("ml", 1000), "리터": ("ml", 1000)}
+
+
+def quantities(text: str) -> dict[str, set[float]]:
+    out: dict[str, set[float]] = {}
+    for x, num, unit in QTY_RE.findall(html.unescape(text).lower().replace(",", "")):
+        kind, mul = ("n", 1) if x else QTY_UNIT[unit]
+        out.setdefault(kind, set()).add(round(float(x or num) * mul, 3))
+    return out
+
+
+def qty_compatible(deal_title: str, cand_name: str) -> bool:
+    dq, cq = quantities(deal_title), quantities(cand_name)
+    return all(dq[k] & cq[k] for k in dq.keys() & cq.keys())
 
 
 def tokens(text: str, keep_single: bool = False) -> list[str]:
@@ -69,6 +94,8 @@ def match_score(deal_title: str, cand_name: str) -> float:
         return 0.0
     if any(c in cand_name for c in CAUTION) and not any(c in deal_title for c in CAUTION):
         return 0.0                                              # 병행·해외·중고 상품은 딜도 그런 상품일 때만
+    if not qty_compatible(deal_title, cand_name):
+        return 0.0
     cset = {w.replace("-", "") for w in ct}
     cn = " ".join(ct)
     for w in dt:
@@ -82,14 +109,15 @@ def match_score(deal_title: str, cand_name: str) -> float:
 
 @dataclass
 class Candidate:
-    pcode: str
+    pcode: str                  # 소스 안에서의 상품/판매글 id
     name: str
     url: str
-    price: Optional[float]      # 이 상품(색상·옵션 포함) 현재 전체 쇼핑몰 최저가
+    price: Optional[float]      # 다나와·에누리: 현재 전체 쇼핑몰 최저가 / 옥션: 판매글 가격
 
 
+# ---------------------------------------------------------------- 파서 (순수 함수, 테스트 대상)
 def parse_search(page: str) -> list[Candidate]:
-    """검색 결과의 상품 블록 `<li id="productItem<pcode>" class="prod_item">` 마다 상품명(prod_name)과
+    """다나와 검색 결과의 상품 블록 `<li id="productItem<pcode>" class="prod_item">` 마다 상품명(prod_name)과
     옵션·색상별 가격(price_sect) 중 최저를 현재 전체 쇼핑몰 최저가로."""
     out: list[Candidate] = []
     marks = list(re.finditer(r'id="productItem(\d+)"', page))
@@ -108,17 +136,68 @@ def parse_search(page: str) -> list[Candidate]:
     return out
 
 
-def _search(query: str) -> str:
-    if not allowed(SEARCH_URL):
-        raise RuntimeError("robots.txt 금지: 다나와 검색")
-    r = httpx.get(SEARCH_URL, params={"query": query}, headers={"User-Agent": settings.user_agent, "Accept-Language": "ko-KR,ko;q=0.9"},
-                  timeout=20, follow_redirects=True)
-    r.raise_for_status()
-    return r.text
+parse_danawa = parse_search
 
 
+def parse_enuri(page: str) -> list[Candidate]:
+    """에누리 검색 결과의 JSON-LD ItemList: Product(name, sku, url, offers.lowPrice)."""
+    out: list[Candidate] = []
+    for block in re.findall(r'<script type="application/ld\+json">(.*?)</script>', page, re.S):
+        try:
+            data = json.loads(block)
+        except json.JSONDecodeError:
+            continue
+        for el in data.get("itemListElement", []) if isinstance(data, dict) else []:
+            it = el.get("item") or {}
+            offers = it.get("offers") or {}
+            low = offers.get("lowPrice") or offers.get("price")
+            if not it.get("name") or not low:
+                continue
+            sku = str(it.get("sku") or re.sub(r"\D", "", it.get("url", "")) or it["name"])
+            out.append(Candidate(sku, html.unescape(it["name"]), it.get("url") or "", float(low)))
+    return out
+
+
+def parse_auction(page: str) -> list[Candidate]:
+    """옥션 검색 결과 __NEXT_DATA__ 의 판매글(item.text, price.price.text). 광고 모듈(clickUrl 이 cpc)은 제외."""
+    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', page, re.S)
+    if not m:
+        return []
+    try:
+        data = json.loads(m.group(1))
+        modules = data["props"]["pageProps"]["initialStates"]["curatorData"]["regionsData"]["content"]["modules"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return []
+    out: list[Candidate] = []
+    for mod in modules:
+        for row in mod.get("rows") or []:
+            vm = row.get("viewModel") if isinstance(row, dict) else None
+            if not isinstance(vm, dict) or not isinstance(vm.get("item"), dict) or not isinstance(vm.get("price"), dict):
+                continue
+            if "/cpc/" in str(vm.get("clickUrl", "")):
+                continue
+            text = (vm["item"].get("text") or "").strip()
+            ptxt = ((vm["price"].get("price") or {}).get("text") or vm["price"].get("binPrice") or "")
+            try:
+                price = float(str(ptxt).replace(",", ""))
+            except ValueError:
+                continue
+            if text and price > 0:
+                out.append(Candidate(str(vm.get("itemNo") or text), text, vm["item"].get("link") or "", price))
+    return out
+
+
+# ---------------------------------------------------------------- 매칭
 def best_match(deal_title: str, deal_price: Optional[float], cands: list[Candidate]) -> Optional[tuple[Candidate, float]]:
     """점수 ≥ MIN_SCORE 이고 가격 비율이 그럴듯한 후보 중, 최고점 −0.1 안의 후보에서 가장 싼 것 (기준가를 보수적으로 낮게)."""
+    ok = _valid(deal_title, deal_price, cands)
+    if not ok:
+        return None
+    top = max(s for _, s in ok)
+    return min(((c, s) for c, s in ok if s >= top - 0.1), key=lambda cs: cs[0].price or 1e18)
+
+
+def _valid(deal_title: str, deal_price: Optional[float], cands: list[Candidate]) -> list[tuple[Candidate, float]]:
     ok = []
     for c in cands:
         if not c.price:
@@ -127,10 +206,51 @@ def best_match(deal_title: str, deal_price: Optional[float], cands: list[Candida
         if s < MIN_SCORE or (deal_price and not (RATIO_MIN <= deal_price / c.price <= RATIO_MAX)):
             continue
         ok.append((c, s))
-    if not ok:
+    return ok
+
+
+def listing_median(deal_title: str, deal_price: Optional[float], cands: list[Candidate],
+                   min_n: int = AUCTION_MIN_LISTINGS) -> Optional[tuple[Candidate, float]]:
+    """오픈마켓 판매글: 조건에 맞는 판매글 가격의 중앙값 (흔히 팔리는 가격). 대표 이름은 최고점 판매글."""
+    ok = _valid(deal_title, deal_price, cands)
+    if len(ok) < min_n:
         return None
-    top = max(s for _, s in ok)
-    return min(((c, s) for c, s in ok if s >= top - 0.1), key=lambda cs: cs[0].price or 1e18)
+    best = max(ok, key=lambda cs: cs[1])
+    return Candidate(best[0].pcode, best[0].name, best[0].url, float(median(c.price for c, _ in ok))), best[1]
+
+
+# ---------------------------------------------------------------- 소스
+@dataclass
+class Source:
+    name: str
+    url: str                                            # 검색 URL, {q} 자리에 검색어
+    parse: Callable[[str], list[Candidate]]
+    pick: Callable[..., Optional[tuple[Candidate, float]]]
+    delay: float                                        # 같은 소스 요청 간 최소 간격(초)
+    param: Optional[str] = None                         # GET 파라미터 이름 (없으면 url 에 직접)
+
+
+SOURCES: list[Source] = [
+    Source("danawa", "https://search.danawa.com/dsearch.php", parse_danawa, best_match, 10.0, "query"),
+    Source("enuri", "https://www.enuri.com/search.jsp", parse_enuri, best_match, 2.0, "keyword"),
+    Source("auction", "https://browse.auction.co.kr/search", parse_auction, listing_median, 2.0, "keyword"),
+]
+
+
+def _fetch(src: Source, query: str) -> str:
+    if not allowed(src.url):
+        raise RuntimeError(f"robots.txt 금지: {src.name}")
+    for attempt in range(2):                                    # 일시 오류(타임아웃·5xx) 1회 재시도
+        try:
+            r = httpx.get(src.url, params={src.param: query}, timeout=20, follow_redirects=True,
+                          headers={"User-Agent": settings.user_agent, "Accept-Language": "ko-KR,ko;q=0.9"})
+            r.raise_for_status()
+            return r.text
+        except (httpx.TransportError, httpx.HTTPStatusError):
+            if attempt:
+                raise
+            time.sleep(3)
+    raise RuntimeError("unreachable")
 
 
 def usual_price(history: list[float], current: float) -> float:
@@ -138,31 +258,45 @@ def usual_price(history: list[float], current: float) -> float:
     return float(median(history + [current])) if history else current
 
 
-def price_pending(store, limit: int = PRICE_PER_RUN, delay: float = CRAWL_DELAY,
-                  search: Callable[[str], str] = None) -> tuple[int, int]:
-    """시세 확인 안 된 최근 딜을 limit 건: 다나와 매칭 → market_prices 적재 → deal.ref_* / below_pct. (처리, 매칭)"""
-    search = search or _search
+def price_pending(store, limit: int = PRICE_PER_RUN, sources: Optional[list[Source]] = None,
+                  fetch: Callable[[Source, str], str] = None, sleep: Callable[[float], None] = time.sleep) -> tuple[int, int]:
+    """시세 확인 안 된 최근 딜을 limit 건: 소스마다 매칭 → market_prices 적재 → deal.ref_* / below_pct. (처리, 매칭)"""
+    sources = sources if sources is not None else SOURCES
+    fetch = fetch or _fetch
+    last: dict[str, float] = {}
     todo = store.deals_to_price(limit)
     matched = 0
-    for i, d in enumerate(todo):
+    for d in todo:
         d.ref_checked = True
         q = query_of(d.title)
+        found: list[tuple[Source, Candidate, float, float]] = []          # (소스, 후보, 점수, 소스별 평소 가격)
         if d.price and q:
-            try:
-                if i and delay:
-                    time.sleep(delay)
-                hit = best_match(d.title, d.price, parse_search(search(q)))
-            except Exception as e:  # noqa: BLE001
-                log.debug("시세 조회 실패 %s: %s", q, str(e)[:80])
-                hit = None
-            if hit:
-                c, _ = hit
-                hist = store.market_history(c.pcode, USUAL_DAYS)
-                store.add_market_price(c.pcode, c.name, c.price)
-                usual = usual_price(hist, c.price)
-                d.ref_price, d.ref_name, d.ref_url = usual, c.name, c.url
-                d.below_pct = round((usual - d.price) / usual * 100, 1)
-                matched += 1
+            for src in sources:
+                wait = src.delay - (time.monotonic() - last.get(src.name, -1e9))
+                if wait > 0:
+                    sleep(wait)
+                last[src.name] = time.monotonic()
+                try:
+                    hit = src.pick(d.title, d.price, src.parse(fetch(src, q)))
+                except Exception as e:  # noqa: BLE001 — 한 소스 실패가 다른 소스를 막지 않는다
+                    log.debug("시세 조회 실패 %s %s: %s", src.name, q, str(e)[:80])
+                    continue
+                if not hit:
+                    continue
+                c, score = hit
+                key = f"{src.name}:{c.pcode}"
+                hist = store.market_history(key, USUAL_DAYS)
+                store.add_market_price(key, c.name, c.price)
+                found.append((src, c, score, usual_price(hist, c.price)))
+        if found:
+            usual = float(median(u for *_, u in found))
+            best = max(found, key=lambda f: (f[2], f[0].name != "auction"))    # 점수 높은 것, 같으면 가격비교 사이트
+            link = next((c.url for s, c, _, _ in found if s.name in ("danawa", "enuri") and c.url), best[1].url)
+            d.ref_price = usual
+            d.ref_name = f"{best[1].name} ({' · '.join(f'{LABEL[s.name]} {u:,.0f}' for s, _, _, u in found)})"[:300]
+            d.ref_url = link
+            d.below_pct = round((usual - d.price) / usual * 100, 1)
+            matched += 1
         try:
             store.update_deal(d)
         except Exception as e:  # noqa: BLE001

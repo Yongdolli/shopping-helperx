@@ -52,7 +52,7 @@ export default function Deals() {
       <div>
         <h1 className="text-xl font-bold">🔥 딜</h1>
         <p className="text-sm text-slate-500">핫딜 커뮤니티에서 모은 최근 7일 딜 {deals.length}건 중 <b className="text-emerald-600">평소보다 {minPct}%↑ 싼 것 {pctCount}건</b>{keywords.length ? ` · 관심 키워드 ${kwCount}건` : ""}</p>
-        <p className="text-[11px] text-slate-400">평소 가격 = 같은 상품의 다나와 전체 쇼핑몰 최저가를 매번 관측해 쌓은 중앙값 (시세 확인 {checked}건, 쌓일수록 정확해짐). 기준은 설정에서 바꿀 수 있어요.</p>
+        <p className="text-[11px] text-slate-400">평소 가격 = 같은 상품을 다나와·에누리(전체 쇼핑몰 최저가)·옥션(판매가 중앙값)에서 찾아 매번 관측해 쌓은 중앙값 (시세 확인 {checked}건, 쌓일수록 정확해짐). 기준은 설정에서 바꿀 수 있어요.</p>
       </div>
 
       <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 md:mx-0 md:px-0">
@@ -110,7 +110,7 @@ export default function Deals() {
           );
         })}
       </ul>
-      <div className="text-[11px] text-slate-400">"평소 대비"는 다나와에서 같은 상품을 찾아 비교한 값이고, 못 찾은 딜은 게시글·상점 표시 할인율로 판단합니다(정가 부풀리기가 섞일 수 있음). "추적"으로 등록하면 평소 가격 대비 진짜 할인인지 판정이 붙습니다. 워커가 새 딜의 게시글에서 상점 주소를 찾아 두면 원클릭으로 추적됩니다.</div>
+      <div className="text-[11px] text-slate-400">"평소 대비"는 다나와·에누리·옥션에서 같은 상품을 찾아 비교한 값이고(배지에 마우스를 올리면 근거), 못 찾은 딜은 게시글·상점 표시 할인율로 판단합니다(정가 부풀리기가 섞일 수 있음). "추적"으로 등록하면 평소 가격 대비 진짜 할인인지 판정이 붙습니다. 워커가 새 딜의 게시글에서 상점 주소를 찾아 두면 원클릭으로 추적됩니다.</div>
     </div>
   );
 }
