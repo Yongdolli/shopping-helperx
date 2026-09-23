@@ -388,8 +388,18 @@ def matches_keywords(title: str, keywords: list[str]) -> Optional[str]:
     return None
 
 
+def same_key(d: Deal) -> str:
+    """여러 커뮤니티에 같은 딜이 올라온 것을 묶는 키: 제목 글자(공백·기호 제거) + 가격. 웹 types.dealKey 와 동일."""
+    t = re.sub(r"[^0-9a-z가-힣]", "", d.title.lower())
+    return f"{t}|{int(d.price) if d.price else ''}"
+
+
 def pick_for_digest(deals: list[Deal], keywords: list[str], min_pct: float, limit: int = 10) -> list[tuple[Deal, str]]:
-    """다이제스트에 넣을 딜: 관심 키워드 일치 → 할인율 확인 ≥ min_pct 순. (딜, 이유)."""
+    """다이제스트에 넣을 딜: 관심 키워드 일치 → 할인율 확인 ≥ min_pct 순. 같은 딜(여러 커뮤니티)은 하나만. (딜, 이유)."""
+    uniq: dict[str, Deal] = {}
+    for d in sorted(deals, key=lambda d: (d.below_pct is None, d.posted_at)):   # 시세 확인된 것 우선
+        uniq.setdefault(same_key(d), d)
+    deals = list(uniq.values())
     out: list[tuple[Deal, str]] = []
     seen: set[str] = set()
     for d in sorted(deals, key=lambda d: d.posted_at, reverse=True):

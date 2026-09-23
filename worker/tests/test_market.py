@@ -111,3 +111,28 @@ def test_quantity_guard():
     assert M.qty_compatible("퍼실 라벤더 세탁세제 2L 6개", "퍼실 라벤더 젤 2L (6개)")
     assert M.qty_compatible("로지텍 G304 무선 마우스", "로지텍 G304 LIGHTSPEED 3개입")       # 한쪽만 있으면 통과
     assert M.match_score("광천김 도시락김 4g 64봉", "광천김 도시락김 4g 16봉") == 0.0
+
+
+def test_coupang_source_only_with_keys(tmp_path):
+    body = json.dumps({"rCode": "0", "data": {"productData": [
+        {"productId": 857, "productName": "로지텍 G304 LIGHTSPEED 무선 게이밍 마우스", "productPrice": 39900, "productUrl": "https://link.coupang.com/a/x"},
+        {"productId": 858, "productName": "로지텍 마우스 패드", "productPrice": 9900, "productUrl": "https://link.coupang.com/a/y"}]}})
+    assert [(c.pcode, c.price) for c in M.parse_coupang(body)] == [("857", 39900), ("858", 9900)]
+    st = SqliteStorage(tmp_path / "t.db")
+    st.upsert_deals([Deal(f"u{i}", "ppomppu", "x", "", "로지텍 G304 무선 마우스", 29900, posted_at=NOW, fetched_at=NOW) for i in range(7)])
+    calls = []
+    on = M.Source("coupang", "", M.parse_coupang, M.best_match, 0, fetcher=lambda q: calls.append(q) or body, budget=5, enabled=lambda: True)
+    off = M.Source("coupang", "", M.parse_coupang, M.best_match, 0, fetcher=lambda q: calls.append(q) or body, budget=5, enabled=lambda: False)
+    assert M.price_pending(st, sources=[off], sleep=lambda s: None) == (7, 0) and calls == []      # 키 없으면 호출 안 함
+    st.conn.execute("update deals set ref_checked=0"); st.conn.commit()
+    assert M.price_pending(st, sources=[on], sleep=lambda s: None) == (7, 5) and len(calls) == 5   # 실행당 5회 예산
+    d = [x for x in st.list_deals(NOW - timedelta(days=1)) if x.below_pct is not None][0]
+    assert "쿠팡 39,900" in d.ref_name and d.ref_url == "https://link.coupang.com/a/x"
+    assert [s for s in M.SOURCES if s.name == "coupang"][0].budget == 5
+
+
+def test_digest_dedupes_same_deal_across_communities():
+    a = Deal("https://ppomppu/1", "ppomppu", "x", "", "PS5 고요한 시골 정원 이야기", 74100, pct=20, posted_at=NOW, fetched_at=NOW)
+    b = Deal("https://ruliweb/2", "ruliweb", "x", "", "PS5 고요한 시골 정원이야기", 74100, pct=20, posted_at=NOW, fetched_at=NOW)
+    assert D.same_key(a) == D.same_key(b)
+    assert len(D.pick_for_digest([a, b], [], 10)) == 1

@@ -7,7 +7,8 @@
   다나와    | 전체 쇼핑몰 현재 최저가 (옵션·색상 중 최저) | 허용, Crawl-delay 10초
   에누리    | 전체 쇼핑몰 현재 최저가 (JSON-LD lowPrice)  | 허용, 2초
   옥션      | 조건에 맞는 판매글 가격들의 중앙값 (≥3건)  | 허용, 2초
-  (네이버·쿠팡·지마켓·SSG·롯데온은 robots 금지·차단으로 사용 불가 — 2026-09 실측)
+  쿠팡      | 파트너스 Open API 검색 결과 최저가        | 공식 API, 키 있을 때만, 실행당 5회 (시간당 ~10회 제한)
+  (네이버·지마켓·SSG·롯데온, 그리고 쿠팡 웹페이지는 robots 금지·차단으로 사용 불가 — 2026-09 실측)
 
 소스별 평소 가격 = 그 키의 최근 90일 관측 중앙값(오늘 포함). 딜의 평소 가격 = 소스별 평소 가격들의 중앙값.
 below_pct = (평소 가격 − 딜 가격) / 평소 가격. ref_name 에 근거("다나와 38,900 · 에누리 46,270 · 옥션 48,730")를 붙인다.
@@ -44,7 +45,7 @@ STOP = {"특가", "할인", "무료", "무배", "배송", "무료배송", "정�
         "당일발송", "당일출고", "국내발송", "인증점", "공식인증", "판매점"}
 CAUTION = ("병행", "해외", "직구", "비공식", "중고", "리퍼", "벌크", "호환", "렌탈", "대여")
 MODEL_RE = re.compile(r"^(?=.*\d)(?=.*[a-z])[a-z0-9\-]{3,}$")
-LABEL = {"danawa": "다나와", "enuri": "에누리", "auction": "옥션"}
+LABEL = {"danawa": "다나와", "enuri": "에누리", "auction": "옥션", "coupang": "쿠팡"}
 
 # 수량 가드: 개수·용량·무게가 둘 다 적혀 있으면 같은 값이 하나는 있어야 한다 (48팩 ≠ 24개, 64봉 ≠ 16봉)
 QTY_RE = re.compile(r"(?:x|×|\*)\s*(\d+)|(\d+(?:\.\d+)?)\s*(개입|개|팩|입|병|캔|봉|매|구|롤|ea|kg|g|ml|l|리터)(?![a-z가-힣])")
@@ -187,6 +188,34 @@ def parse_auction(page: str) -> list[Candidate]:
     return out
 
 
+def parse_coupang(body: str) -> list[Candidate]:
+    """쿠팡 파트너스 검색 API 응답 JSON: data.productData[] (productId, productName, productPrice, productUrl)."""
+    try:
+        d = json.loads(body)
+    except json.JSONDecodeError:
+        return []
+    items = ((d.get("data") or {}).get("productData") or []) if isinstance(d, dict) else []
+    out = []
+    for it in items:
+        try:
+            out.append(Candidate(str(it["productId"]), it.get("productName") or "", it.get("productUrl") or "", float(it["productPrice"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def _coupang_search(query: str) -> str:
+    from urllib.parse import urlencode
+    from .adapters.coupang import DOMAIN, SEARCH_PATH, sign
+    qs = urlencode({"keyword": query[:60], "limit": 20})
+    auth = sign("GET", SEARCH_PATH, qs, settings.coupang_access_key, settings.coupang_secret_key)
+    r = httpx.get(f"{DOMAIN}{SEARCH_PATH}?{qs}", headers={"Authorization": auth}, timeout=20)
+    if r.status_code == 403:
+        raise RuntimeError("쿠팡 403 — 호출 제한 또는 키 오류")
+    r.raise_for_status()
+    return r.text
+
+
 # ---------------------------------------------------------------- 매칭
 def best_match(deal_title: str, deal_price: Optional[float], cands: list[Candidate]) -> Optional[tuple[Candidate, float]]:
     """점수 ≥ MIN_SCORE 이고 가격 비율이 그럴듯한 후보 중, 최고점 −0.1 안의 후보에서 가장 싼 것 (기준가를 보수적으로 낮게)."""
@@ -227,17 +256,24 @@ class Source:
     parse: Callable[[str], list[Candidate]]
     pick: Callable[..., Optional[tuple[Candidate, float]]]
     delay: float                                        # 같은 소스 요청 간 최소 간격(초)
-    param: Optional[str] = None                         # GET 파라미터 이름 (없으면 url 에 직접)
+    param: Optional[str] = None                         # GET 파라미터 이름
+    fetcher: Optional[Callable[[str], str]] = None      # 검색어 → 응답 본문 (API 소스)
+    budget: int = 0                                     # 실행당 호출 상한 (0 = 무제한)
+    enabled: Callable[[], bool] = lambda: True
 
 
 SOURCES: list[Source] = [
     Source("danawa", "https://search.danawa.com/dsearch.php", parse_danawa, best_match, 10.0, "query"),
     Source("enuri", "https://www.enuri.com/search.jsp", parse_enuri, best_match, 2.0, "keyword"),
     Source("auction", "https://browse.auction.co.kr/search", parse_auction, listing_median, 2.0, "keyword"),
+    Source("coupang", "https://api-gateway.coupang.com", parse_coupang, best_match, 6.0, fetcher=_coupang_search, budget=5,
+           enabled=lambda: bool(settings.coupang_access_key and settings.coupang_secret_key)),
 ]
 
 
 def _fetch(src: Source, query: str) -> str:
+    if src.fetcher:                                             # 공식 API (robots 대상 아님)
+        return src.fetcher(query)
     if not allowed(src.url):
         raise RuntimeError(f"robots.txt 금지: {src.name}")
     for attempt in range(2):                                    # 일시 오류(타임아웃·5xx) 1회 재시도
@@ -263,7 +299,9 @@ def price_pending(store, limit: int = PRICE_PER_RUN, sources: Optional[list[Sour
     """시세 확인 안 된 최근 딜을 limit 건: 소스마다 매칭 → market_prices 적재 → deal.ref_* / below_pct. (처리, 매칭)"""
     sources = sources if sources is not None else SOURCES
     fetch = fetch or _fetch
+    sources = [s for s in sources if s.enabled()]
     last: dict[str, float] = {}
+    used: dict[str, int] = {}
     todo = store.deals_to_price(limit)
     matched = 0
     for d in todo:
@@ -272,6 +310,9 @@ def price_pending(store, limit: int = PRICE_PER_RUN, sources: Optional[list[Sour
         found: list[tuple[Source, Candidate, float, float]] = []          # (소스, 후보, 점수, 소스별 평소 가격)
         if d.price and q:
             for src in sources:
+                if src.budget and used.get(src.name, 0) >= src.budget:
+                    continue
+                used[src.name] = used.get(src.name, 0) + 1
                 wait = src.delay - (time.monotonic() - last.get(src.name, -1e9))
                 if wait > 0:
                     sleep(wait)
@@ -291,7 +332,7 @@ def price_pending(store, limit: int = PRICE_PER_RUN, sources: Optional[list[Sour
         if found:
             usual = float(median(u for *_, u in found))
             best = max(found, key=lambda f: (f[2], f[0].name != "auction"))    # 점수 높은 것, 같으면 가격비교 사이트
-            link = next((c.url for s, c, _, _ in found if s.name in ("danawa", "enuri") and c.url), best[1].url)
+            link = next((c.url for s, c, _, _ in found if s.name in ("danawa", "enuri", "coupang") and c.url), best[1].url)
             d.ref_price = usual
             d.ref_name = f"{best[1].name} ({' · '.join(f'{LABEL[s.name]} {u:,.0f}' for s, _, _, u in found)})"[:300]
             d.ref_url = link

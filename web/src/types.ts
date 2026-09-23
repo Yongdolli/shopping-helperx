@@ -75,6 +75,19 @@ export interface Deal {
 /** 판단에 쓰는 할인율: 평소 대비가 있으면 그것, 없으면 표시 할인율 (워커 Deal.effective_pct 와 동일) */
 export const effectivePct = (d: Deal) => (d.below_pct ?? d.pct ?? null);
 
+/** 여러 커뮤니티에 올라온 같은 딜을 묶는 키: 제목 글자(공백·기호 제거) + 가격. 워커 deals.same_key 와 동일 */
+export const dealKey = (d: Deal) => `${d.title.toLowerCase().replace(/[^0-9a-z가-힣]/g, "")}|${d.price ? Math.trunc(d.price) : ""}`;
+
+/** 같은 딜 묶음: 시세 확인된 것 → 최신 순으로 대표 1건, 나머지 출처는 sources 로 */
+export function groupDeals(list: Deal[]): Array<Deal & { sources: string[] }> {
+  const by = new Map<string, Deal[]>();
+  for (const d of list) { const k = dealKey(d); by.set(k, [...(by.get(k) ?? []), d]); }
+  return [...by.values()].map((g) => {
+    const rep = [...g].sort((a, b) => Number(a.below_pct == null) - Number(b.below_pct == null) || b.posted_at.localeCompare(a.posted_at))[0];
+    return { ...rep, sources: [...new Set(g.map((x) => x.source))] };
+  });
+}
+
 /** 가족 공유 링크 — 태그(또는 전체) 단위 읽기 전용. /s/:token 은 로그인 없이 열린다 */
 export interface ShareLink { token: string; tag: string | null; name: string; created_at: string }
 

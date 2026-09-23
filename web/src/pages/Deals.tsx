@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useStore } from "../store";
 import { toast } from "../components/Toast";
 import { SITE_LABEL, fmtPrice, timeAgo } from "../lib/format";
-import { effectivePct, type Deal } from "../types";
+import { effectivePct, groupDeals, type Deal } from "../types";
 
 type Sort = "recent" | "pct";
 type Mode = "cheap" | "all" | "kw";
@@ -11,7 +11,8 @@ const SOURCE_LABEL: Record<string, string> = { ppomppu: "뽐뿌", ruliweb: "루�
 
 /** 딜 탭 — 등록 없이 핫딜 커뮤니티에 올라온 모든 사이트의 할인을 모아 본다. 워커가 매시간 수집. */
 export default function Deals() {
-  const { deals, settings, addProduct } = useStore();
+  const { deals: rawDeals, settings, addProduct } = useStore();
+  const deals = useMemo(() => groupDeals(rawDeals), [rawDeals]);   // 여러 커뮤니티의 같은 딜은 하나로
   const nav = useNavigate();
   const [busy, setBusy] = useState<string | null>(null);
   const track = async (d: Deal) => {
@@ -86,7 +87,7 @@ export default function Deals() {
                 <div className="min-w-0 flex-1">
                   <div className="text-[11px] text-slate-500 truncate">
                     <span className="font-medium text-slate-700 dark:text-slate-200">{d.site_label || SITE_LABEL[d.site] || d.site}</span>
-                    {" · "}{SOURCE_LABEL[d.source] ?? d.source} · {timeAgo(d.posted_at)}{d.category ? ` · ${d.category}` : ""}
+                    {" · "}{d.sources.map((s) => SOURCE_LABEL[s] ?? s).join("·")}{d.sources.length > 1 ? ` ${d.sources.length}곳` : ""} · {timeAgo(d.posted_at)}{d.category ? ` · ${d.category}` : ""}
                   </div>
                   <a href={d.url} target="_blank" rel="noreferrer" className="block font-semibold leading-snug hover:text-sky-600 line-clamp-2">{d.title}</a>
                   <div className="mt-1 flex items-baseline gap-2 flex-wrap text-sm">
