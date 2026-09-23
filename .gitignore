@@ -13,3 +13,4 @@ web/env.local.txt
 worker/env.txt
 # Chrome 확장 개발 프로필
 extension/_profile/
+worker/data/*.log

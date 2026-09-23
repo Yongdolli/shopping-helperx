@@ -154,7 +154,7 @@ class UserSettings:
     telegram_chat_id: Optional[str] = None
     digest: bool = True          # 하루 3회 모아 받기 (False = 감지 즉시 발송)
     instant_target: bool = True  # digest 여도 목표가 도달(target)은 즉시
-    deal_min_pct: float = 30.0   # 딜 피드: 이 할인율 이상만 '확인된 딜'로 (다이제스트 포함)
+    deal_min_pct: float = 10.0   # 딜: 평소보다(없으면 표시 할인율) 이만큼 이상 싸면 다이제스트에 포함
     deal_keywords: Optional[str] = None   # 관심 키워드 (쉼표 구분) — 일치하면 할인율 없어도 다이제스트에 포함
 
 
@@ -178,6 +178,16 @@ class Deal:
     shop_url: Optional[str] = None      # 게시글에서 찾은 상점 상품 주소 (enrich) → 원클릭 추적
     list_price: Optional[float] = None  # 상점 페이지 정가 (enrich) → pct 근거
     enriched: bool = False              # 보강 시도 완료 (실패해도 True — 재시도 안 함)
+    ref_price: Optional[float] = None   # 평소 가격 (market.py: 다나와 전체 쇼핑몰 최저가 관측 중앙값)
+    ref_name: Optional[str] = None
+    ref_url: Optional[str] = None
+    below_pct: Optional[float] = None   # 평소 대비 % (양수 = 평소보다 쌈)
+    ref_checked: bool = False           # 시세 확인 시도 완료
+
+    @property
+    def effective_pct(self) -> Optional[float]:
+        """판단에 쓰는 할인율: 시세 대비(below_pct)가 있으면 그것, 없으면 게시글·상점 표시 할인율."""
+        return self.below_pct if self.below_pct is not None else self.pct
 
 
 @dataclass

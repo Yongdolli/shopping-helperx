@@ -8,7 +8,11 @@ from pathlib import Path
 from typing import Optional, Protocol
 
 from .config import settings
+import logging
+
 from .models import Alert, Deal, PriceSnapshot, Product, PushSubscription, UserSettings
+
+log = logging.getLogger(__name__)
 
 
 def _iso(dt: datetime) -> str:
@@ -26,7 +30,7 @@ def _default_settings(user_id: Optional[str]) -> UserSettings:
     return UserSettings(user_id, settings.threshold_pct, settings.window_days,
                         bool(settings.alert_email_to), bool(settings.telegram_chat_id), True,
                         settings.alert_email_to or None, settings.telegram_chat_id or None, settings.digest, True,
-                        30.0, None)
+                        10.0, None)
 
 
 class Storage(Protocol):
@@ -53,7 +57,10 @@ class Storage(Protocol):
     def list_deals(self, since: datetime) -> list[Deal]: ...
     def prune_deals(self, before: datetime) -> None: ...
     def deals_to_enrich(self, limit: int) -> list[Deal]: ...      # 보강 안 된 최신 딜
-    def update_deal(self, d: Deal) -> None: ...                    # shop_url/list_price/pct/enriched 반영
+    def update_deal(self, d: Deal) -> None: ...                    # shop_url/list_price/pct/enriched/ref_* 반영
+    def deals_to_price(self, limit: int) -> list[Deal]: ...       # 시세 확인 안 된 최근(3일) 가격 있는 딜
+    def market_history(self, pcode: str, days: int) -> list[float]: ...
+    def add_market_price(self, pcode: str, name: str, price: float) -> None: ...
 
 
 # ---------------------------------------------------------------- SQLite
@@ -89,7 +96,11 @@ create table if not exists push_subscriptions (
 create table if not exists deals (
   url text primary key, source text not null, site text not null, site_label text, title text not null,
   price real, currency text not null default 'KRW', shipping text, pct real, image_url text, category text,
-  posted_at text not null, fetched_at text not null, shop_url text, list_price real, enriched integer not null default 0
+  posted_at text not null, fetched_at text not null, shop_url text, list_price real, enriched integer not null default 0,
+  ref_price real, ref_name text, ref_url text, below_pct real, ref_checked integer not null default 0
+);
+create table if not exists market_prices (
+  id integer primary key autoincrement, pcode text not null, name text, price real not null, captured_at text not null
 );
 """
 
@@ -100,10 +111,12 @@ class SqliteStorage:
         self.conn = sqlite3.connect(path)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SQLITE_SCHEMA)
-        for col, ddl in (("digest", "integer default 1"), ("instant_target", "integer default 1"),   # 기존 DB 에 컬럼 추가 (v0.8~)
-                         ("deal_min_pct", "real default 30"), ("deal_keywords", "text")):
+        for table, col, ddl in (("user_settings", "digest", "integer default 1"), ("user_settings", "instant_target", "integer default 1"),   # 기존 DB 에 컬럼 추가 (v0.8~)
+                                ("user_settings", "deal_min_pct", "real default 10"), ("user_settings", "deal_keywords", "text"),
+                                ("deals", "ref_price", "real"), ("deals", "ref_name", "text"), ("deals", "ref_url", "text"),
+                                ("deals", "below_pct", "real"), ("deals", "ref_checked", "integer not null default 0")):
             try:
-                self.conn.execute(f"alter table user_settings add column {col} {ddl}")
+                self.conn.execute(f"alter table {table} add column {col} {ddl}")
                 if col == "digest":   # v0.8 이전 알림은 이미 보낸 것 — 첫 다이제스트에 쏟아지지 않게
                     self.conn.execute("update alerts set notified=1 where notified=0")
                 self.conn.commit()
@@ -221,7 +234,7 @@ class SqliteStorage:
                             bool(r["notify_telegram"]), bool(r["notify_push"]), r["email"], r["telegram_chat_id"],
                             bool(r["digest"]) if r["digest"] is not None else True,
                             bool(r["instant_target"]) if r["instant_target"] is not None else True,
-                            float(r["deal_min_pct"]) if r["deal_min_pct"] is not None else 30.0, r["deal_keywords"])
+                            float(r["deal_min_pct"]) if r["deal_min_pct"] is not None else 10.0, r["deal_keywords"])
 
     def push_subscriptions(self, user_id: Optional[str]) -> list[PushSubscription]:
         rows = self.conn.execute("select * from push_subscriptions where user_id is ?", (user_id,))
@@ -261,15 +274,33 @@ class SqliteStorage:
         return [self._row_to_deal(r) for r in rows]
 
     def update_deal(self, d: Deal) -> None:
-        self.conn.execute("update deals set shop_url=?, list_price=?, pct=?, price=?, enriched=? where url=?",
-                          (d.shop_url, d.list_price, d.pct, d.price, int(d.enriched), d.url))
+        self.conn.execute("update deals set shop_url=?, list_price=?, pct=?, price=?, enriched=?, ref_price=?, ref_name=?, ref_url=?,"
+                          " below_pct=?, ref_checked=? where url=?",
+                          (d.shop_url, d.list_price, d.pct, d.price, int(d.enriched), d.ref_price, d.ref_name, d.ref_url,
+                           d.below_pct, int(d.ref_checked), d.url))
+        self.conn.commit()
+
+    def deals_to_price(self, limit: int) -> list[Deal]:
+        since = _iso(datetime.now(timezone.utc) - timedelta(days=3))
+        rows = self.conn.execute("select * from deals where ref_checked=0 and price is not null and posted_at>=? order by posted_at desc limit ?",
+                                 (since, limit))
+        return [self._row_to_deal(r) for r in rows]
+
+    def market_history(self, pcode: str, days: int) -> list[float]:
+        since = _iso(datetime.now(timezone.utc) - timedelta(days=days))
+        return [r["price"] for r in self.conn.execute("select price from market_prices where pcode=? and captured_at>=?", (pcode, since))]
+
+    def add_market_price(self, pcode: str, name: str, price: float) -> None:
+        self.conn.execute("insert into market_prices(pcode,name,price,captured_at) values(?,?,?,?)",
+                          (pcode, name, price, _iso(datetime.now(timezone.utc))))
         self.conn.commit()
 
     @staticmethod
     def _row_to_deal(r: sqlite3.Row) -> Deal:
         return Deal(r["url"], r["source"], r["site"], r["site_label"] or "", r["title"], r["price"], r["currency"], r["shipping"],
                     r["pct"], _parse(r["posted_at"]), _parse(r["fetched_at"]), r["image_url"], r["category"],
-                    r["shop_url"], r["list_price"], bool(r["enriched"]))
+                    r["shop_url"], r["list_price"], bool(r["enriched"]), r["ref_price"], r["ref_name"], r["ref_url"],
+                    r["below_pct"], bool(r["ref_checked"]))
 
     @staticmethod
     def _row_to_alert(r: sqlite3.Row) -> Alert:
@@ -388,7 +419,7 @@ class SupabaseStorage:
         return UserSettings(user_id, float(r["threshold_pct"]), int(r["window_days"]), r["notify_email"],
                             r["notify_telegram"], r.get("notify_push", True), r.get("email"), r.get("telegram_chat_id"),
                             bool(r.get("digest", True)), bool(r.get("instant_target", True)),
-                            float(r.get("deal_min_pct") or 30), ",".join(r.get("deal_keywords") or []) or None)
+                            float(r.get("deal_min_pct") or 10), ",".join(r.get("deal_keywords") or []) or None)
 
     def push_subscriptions(self, user_id: Optional[str]) -> list[PushSubscription]:
         if not user_id:
@@ -427,15 +458,41 @@ class SupabaseStorage:
         return [self._to_deal(r) for r in rows]
 
     def update_deal(self, d: Deal) -> None:
-        self.db.table("deals").update({"shop_url": d.shop_url, "list_price": d.list_price, "pct": d.pct, "price": d.price,
-                                       "enriched": d.enriched}).eq("url", d.url).execute()
+        base = {"shop_url": d.shop_url, "list_price": d.list_price, "pct": d.pct, "price": d.price, "enriched": d.enriched}
+        full = {**base, "ref_price": d.ref_price, "ref_name": d.ref_name, "ref_url": d.ref_url, "below_pct": d.below_pct,
+                "ref_checked": d.ref_checked}
+        try:
+            self.db.table("deals").update(full).eq("url", d.url).execute()
+        except Exception as e:  # noqa: BLE001 — 011 마이그레이션 전이면 시세 컬럼 없이 저장
+            if "ref_" not in str(e) and "below_pct" not in str(e) and "PGRST204" not in str(e):
+                raise
+            self.db.table("deals").update(base).eq("url", d.url).execute()
+
+    def deals_to_price(self, limit: int) -> list[Deal]:
+        since = _iso(datetime.now(timezone.utc) - timedelta(days=3))
+        try:
+            rows = (self.db.table("deals").select("*").eq("ref_checked", False).not_.is_("price", "null").gte("posted_at", since)
+                    .order("posted_at", desc=True).limit(limit).execute().data)
+        except Exception as e:  # noqa: BLE001
+            log.warning("시세 확인 건너뜀 (011_market.sql 실행 필요): %s", str(e)[:100])
+            return []
+        return [self._to_deal(r) for r in rows]
+
+    def market_history(self, pcode: str, days: int) -> list[float]:
+        since = _iso(datetime.now(timezone.utc) - timedelta(days=days))
+        rows = self.db.table("market_prices").select("price").eq("pcode", pcode).gte("captured_at", since).execute().data
+        return [float(r["price"]) for r in rows]
+
+    def add_market_price(self, pcode: str, name: str, price: float) -> None:
+        self.db.table("market_prices").insert({"pcode": pcode, "name": name, "price": price}).execute()
 
     @staticmethod
     def _to_deal(r: dict) -> Deal:
         f = lambda k: float(r[k]) if r.get(k) is not None else None  # noqa: E731
         return Deal(r["url"], r["source"], r["site"], r.get("site_label") or "", r["title"], f("price"), r.get("currency") or "KRW",
                     r.get("shipping"), f("pct"), _parse(r["posted_at"]), _parse(r.get("fetched_at")) or _parse(r["posted_at"]),
-                    r.get("image_url"), r.get("category"), r.get("shop_url"), f("list_price"), bool(r.get("enriched", False)))
+                    r.get("image_url"), r.get("category"), r.get("shop_url"), f("list_price"), bool(r.get("enriched", False)),
+                    f("ref_price"), r.get("ref_name"), r.get("ref_url"), f("below_pct"), bool(r.get("ref_checked", False)))
 
     @staticmethod
     def _to_alert(r: dict) -> Alert:

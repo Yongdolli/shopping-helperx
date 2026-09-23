@@ -3,9 +3,10 @@ import { Link, useNavigate } from "react-router-dom";
 import { useStore } from "../store";
 import { toast } from "../components/Toast";
 import { SITE_LABEL, fmtPrice, timeAgo } from "../lib/format";
-import type { Deal } from "../types";
+import { effectivePct, type Deal } from "../types";
 
 type Sort = "recent" | "pct";
+type Mode = "cheap" | "all" | "kw";
 const SOURCE_LABEL: Record<string, string> = { ppomppu: "뽐뿌", ruliweb: "루리웹", clien: "클리앙", quasarzone: "퀘이사존", fmkorea: "에펨" };
 
 /** 딜 탭 — 등록 없이 핫딜 커뮤니티에 올라온 모든 사이트의 할인을 모아 본다. 워커가 매시간 수집. */
@@ -19,13 +20,12 @@ export default function Deals() {
     try { await addProduct(d.shop_url, d.title); toast("추적을 시작했습니다 — 3회 이상 가격이 쌓이면 판정이 붙습니다"); nav("/"); }
     catch (e) { toast("실패: " + (e as Error).message); } finally { setBusy(null); }
   };
-  const minPct = settings?.deal_min_pct ?? 30;
+  const minPct = settings?.deal_min_pct ?? 10;
   const keywords = (settings?.deal_keywords ?? []).map((k) => k.toLowerCase()).filter(Boolean);
   const [q, setQ] = useState("");
   const [site, setSite] = useState("");
-  const [onlyPct, setOnlyPct] = useState(false);
-  const [onlyKw, setOnlyKw] = useState(false);
-  const [sort, setSort] = useState<Sort>("recent");
+  const [mode, setMode] = useState<Mode>("cheap");       // 기본: 평소보다 싼 딜만
+  const [sort, setSort] = useState<Sort>("pct");
 
   const kwOf = (d: Deal) => keywords.find((k) => d.title.toLowerCase().includes(k)) ?? null;
   const sites = useMemo(() => Object.entries(deals.reduce<Record<string, number>>((a, d) => { a[d.site] = (a[d.site] ?? 0) + 1; return a; }, {}))
@@ -33,14 +33,15 @@ export default function Deals() {
 
   const list = useMemo(() => {
     let l = deals;
-    if (onlyPct) l = l.filter((d) => d.pct != null && d.pct >= minPct);
-    if (onlyKw) l = l.filter((d) => kwOf(d));
+    if (mode === "cheap") l = l.filter((d) => (effectivePct(d) ?? -1) >= minPct);
+    if (mode === "kw") l = l.filter((d) => kwOf(d));
     if (site) l = l.filter((d) => d.site === site);
     if (q.trim()) l = l.filter((d) => d.title.toLowerCase().includes(q.toLowerCase()) || (d.site_label ?? "").toLowerCase().includes(q.toLowerCase()));
-    return [...l].sort(sort === "pct" ? (a, b) => (b.pct ?? -1) - (a.pct ?? -1) || b.posted_at.localeCompare(a.posted_at) : (a, b) => b.posted_at.localeCompare(a.posted_at));
-  }, [deals, onlyPct, onlyKw, site, q, sort, minPct, keywords]);   // eslint-disable-line react-hooks/exhaustive-deps
+    return [...l].sort(sort === "pct" ? (a, b) => (effectivePct(b) ?? -999) - (effectivePct(a) ?? -999) || b.posted_at.localeCompare(a.posted_at) : (a, b) => b.posted_at.localeCompare(a.posted_at));
+  }, [deals, mode, site, q, sort, minPct, keywords]);   // eslint-disable-line react-hooks/exhaustive-deps
 
-  const pctCount = deals.filter((d) => d.pct != null && d.pct >= minPct).length;
+  const pctCount = deals.filter((d) => (effectivePct(d) ?? -1) >= minPct).length;
+  const checked = deals.filter((d) => d.below_pct != null).length;
   const kwCount = keywords.length ? deals.filter((d) => kwOf(d)).length : 0;
   const chip = (on: boolean, label: string, onClick: () => void, key?: string) => (
     <button key={key ?? label} onClick={onClick} className={`rounded-full px-3 py-1.5 text-sm whitespace-nowrap transition ${on ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900" : "bg-white dark:bg-slate-900 ring-1 ring-slate-200 dark:ring-slate-800 text-slate-600 dark:text-slate-300"}`}>{label}</button>
@@ -50,13 +51,14 @@ export default function Deals() {
     <div className="space-y-4">
       <div>
         <h1 className="text-xl font-bold">🔥 딜</h1>
-        <p className="text-sm text-slate-500">핫딜 커뮤니티 5곳에서 매시간 모은 최근 7일 할인 {deals.length}건 · 할인율 {minPct}%↑ 확인 {pctCount}건{keywords.length ? ` · 관심 키워드 ${kwCount}건` : ""}</p>
+        <p className="text-sm text-slate-500">핫딜 커뮤니티에서 모은 최근 7일 딜 {deals.length}건 중 <b className="text-emerald-600">평소보다 {minPct}%↑ 싼 것 {pctCount}건</b>{keywords.length ? ` · 관심 키워드 ${kwCount}건` : ""}</p>
+        <p className="text-[11px] text-slate-400">평소 가격 = 같은 상품의 다나와 전체 쇼핑몰 최저가를 매번 관측해 쌓은 중앙값 (시세 확인 {checked}건, 쌓일수록 정확해짐). 기준은 설정에서 바꿀 수 있어요.</p>
       </div>
 
       <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 md:mx-0 md:px-0">
-        {chip(!onlyPct && !onlyKw, "전체", () => { setOnlyPct(false); setOnlyKw(false); })}
-        {chip(onlyPct, `할인율 ${minPct}%↑`, () => { setOnlyPct(!onlyPct); setOnlyKw(false); })}
-        {keywords.length > 0 && chip(onlyKw, `관심 키워드`, () => { setOnlyKw(!onlyKw); setOnlyPct(false); })}
+        {chip(mode === "cheap", `💰 평소보다 ${minPct}%↑ 싼 것 ${pctCount}`, () => setMode("cheap"))}
+        {chip(mode === "all", `전체 ${deals.length}`, () => setMode("all"))}
+        {keywords.length > 0 && chip(mode === "kw", `관심 키워드 ${kwCount}`, () => setMode("kw"))}
         {!keywords.length && <Link to="/settings" className="rounded-full px-3 py-1.5 text-sm whitespace-nowrap bg-white dark:bg-slate-900 ring-1 ring-dashed ring-slate-300 text-slate-500">+ 관심 키워드 (설정)</Link>}
       </div>
       {sites.length > 1 && (
@@ -67,12 +69,12 @@ export default function Deals() {
       <div className="flex gap-2">
         <input className="input flex-1 min-w-0" placeholder="상품명 검색 (예: 마우스, 헤드폰)" value={q} onChange={(e) => setQ(e.target.value)} />
         <select className="shrink-0 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm" value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
-          <option value="recent">최신순</option><option value="pct">할인율순</option>
+          <option value="pct">많이 싼 순</option><option value="recent">최신순</option>
         </select>
       </div>
 
       {!deals.length && <div className="card p-8 text-center text-sm text-slate-500">아직 수집된 딜이 없습니다. 워커가 매시간 핫딜 커뮤니티를 읽어 옵니다 (`python -m worker deals`).</div>}
-      {deals.length > 0 && !list.length && <div className="card p-8 text-center text-sm text-slate-500">조건에 맞는 딜이 없습니다.</div>}
+      {deals.length > 0 && !list.length && <div className="card p-8 text-center text-sm text-slate-500">{mode === "cheap" ? <>아직 평소보다 {minPct}% 이상 싼 딜이 없습니다. 워커가 매시간 새 딜의 시세를 확인합니다. <button className="text-sky-600 font-semibold" onClick={() => setMode("all")}>전체 보기</button></> : "조건에 맞는 딜이 없습니다."}</div>}
 
       <ul className="space-y-2">
         {list.map((d) => {
@@ -90,7 +92,12 @@ export default function Deals() {
                   <div className="mt-1 flex items-baseline gap-2 flex-wrap text-sm">
                     <span className="font-bold tabular-nums">{d.price != null ? fmtPrice(d.price, d.currency) : "가격 미상"}</span>
                     {d.shipping && <span className="text-xs text-slate-500">배송 {d.shipping}</span>}
-                    {d.pct != null && <span className={`rounded-full px-2 py-0.5 text-[11px] ${d.pct >= minPct ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"}`}>{d.list_price ? `정가 ${fmtPrice(d.list_price, d.currency)} 대비` : "표시"} ▼{d.pct}%</span>}
+                    {d.below_pct != null && d.ref_price != null ? (
+                      <a href={d.ref_url ?? undefined} target="_blank" rel="noreferrer" title={`비교 상품: ${d.ref_name ?? ""}`}
+                        className={`rounded-full px-2 py-0.5 text-[11px] ${d.below_pct >= minPct ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200" : d.below_pct > 0 ? "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" : "bg-rose-50 text-rose-600 dark:bg-rose-900/40 dark:text-rose-200"}`}>
+                        평소 {fmtPrice(d.ref_price, d.currency)} {d.below_pct > 0 ? `대비 ▼${d.below_pct}%` : "보다 비쌈"}
+                      </a>
+                    ) : d.pct != null && <span className={`rounded-full px-2 py-0.5 text-[11px] ${d.pct >= minPct ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"}`}>{d.list_price ? `정가 ${fmtPrice(d.list_price, d.currency)} 대비` : "표시"} ▼{d.pct}%</span>}
                     {kw && <span className="rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200 px-2 py-0.5 text-[11px]">#{kw}</span>}
                   </div>
                 </div>
@@ -103,7 +110,7 @@ export default function Deals() {
           );
         })}
       </ul>
-      <div className="text-[11px] text-slate-400">할인율은 게시글에 적힌 값 또는 상점 정가 대비 계산값이라 정가 부풀리기가 섞일 수 있습니다. "추적"으로 등록하면 평소 가격 대비 진짜 할인인지 판정이 붙습니다. 워커가 새 딜의 게시글에서 상점 주소를 찾아 두면 원클릭으로 추적됩니다.</div>
+      <div className="text-[11px] text-slate-400">"평소 대비"는 다나와에서 같은 상품을 찾아 비교한 값이고, 못 찾은 딜은 게시글·상점 표시 할인율로 판단합니다(정가 부풀리기가 섞일 수 있음). "추적"으로 등록하면 평소 가격 대비 진짜 할인인지 판정이 붙습니다. 워커가 새 딜의 게시글에서 상점 주소를 찾아 두면 원클릭으로 추적됩니다.</div>
     </div>
   );
 }

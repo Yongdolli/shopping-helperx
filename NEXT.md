@@ -1,7 +1,7 @@
 # 다음 할 일 (Claude Code 이어서 작업)
 
 > Claude Code 시작 시: `CLAUDE.md` 먼저 읽기. 현재 v0.9(딜 피드), 실 PostgreSQL 마이그레이션 검증 포함·빌드 통과 (2026-09-08).
-> **사용자 할 일**: Supabase SQL Editor 에서 `supabase/migrations/010_deals.sql` 실행 (또는 ALL_MIGRATIONS.sql 재실행) → 딜 탭 활성.
+> **사용자 할 일 (2026-09-24)**: ① Supabase SQL Editor 에서 `supabase/migrations/011_market.sql` 실행 → '평소보다 싼 딜' 활성. ② GitHub 결제 설정(https://github.com/settings/billing) 확인 — 9/21부터 결제 문제로 Actions 가 시작 안 됨. 그동안 PC 작업 스케줄러가 대신 실행.
 > 원칙: 전부 무료. API 키는 사용자가 직접 연결.
 
 ## 1단계 — 사용자 손이 먼저 필요한 것 (연결)

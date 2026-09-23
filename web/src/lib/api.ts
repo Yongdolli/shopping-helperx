@@ -54,14 +54,14 @@ export interface CaptureInput { url: string; price: number; currency: string; ti
 const CAPTURE_SELLER = "직접 기록";
 
 const DEFAULT_SETTINGS: UserSettings = {
-  threshold_pct: 10, window_days: 90, notify_push: true, notify_email: false, notify_telegram: false, email: "", telegram_chat_id: "", digest: true, instant_target: true, deal_min_pct: 30, deal_keywords: [],
+  threshold_pct: 10, window_days: 90, notify_push: true, notify_email: false, notify_telegram: false, email: "", telegram_chat_id: "", digest: true, instant_target: true, deal_min_pct: 10, deal_keywords: [],
 };
 
 /** 데모 모드용 딜 샘플 (실제로는 워커가 매시간 핫딜 커뮤니티에서 모은다) */
 const DEMO_DEALS: Deal[] = [
-  { url: "https://www.ppomppu.co.kr/zboard/view.php?id=ppomppu&no=1", source: "ppomppu", site: "coupang", site_label: "쿠팡", title: "로지텍 MX Master 3S 무선 마우스 40% 할인", price: 89000, currency: "KRW", shipping: "무료", pct: 40, shop_url: "https://www.coupang.com/vp/products/demo-mx3s", list_price: 149000, posted_at: new Date(Date.now() - 2 * 3600_000).toISOString() },
+  { url: "https://www.ppomppu.co.kr/zboard/view.php?id=ppomppu&no=1", source: "ppomppu", site: "coupang", site_label: "쿠팡", title: "로지텍 MX Master 3S 무선 마우스 40% 할인", price: 89000, currency: "KRW", shipping: "무료", pct: 40, shop_url: "https://www.coupang.com/vp/products/demo-mx3s", list_price: 149000, ref_price: 119000, ref_name: "로지텍 MX Master 3S (정품)", ref_url: "https://prod.danawa.com/info/?pcode=demo", below_pct: 25.2, posted_at: new Date(Date.now() - 2 * 3600_000).toISOString() },
   { url: "https://bbs.ruliweb.com/market/board/1020/read/1", source: "ruliweb", site: "gmarket", site_label: "지마켓", title: "소니 WH-1000XM5 헤드폰 반값", price: 219000, currency: "KRW", shipping: "무료", pct: 50, posted_at: new Date(Date.now() - 5 * 3600_000).toISOString() },
-  { url: "https://www.clien.net/service/board/jirum/1", source: "clien", site: "naver", site_label: "네이버", title: "앤커 737 파워뱅크 24000mAh", price: 99000, currency: "KRW", shipping: "무료", pct: null, posted_at: new Date(Date.now() - 8 * 3600_000).toISOString() },
+  { url: "https://www.clien.net/service/board/jirum/1", source: "clien", site: "naver", site_label: "네이버", title: "앤커 737 파워뱅크 24000mAh", price: 99000, currency: "KRW", shipping: "무료", pct: null, ref_price: 112000, ref_name: "앤커 737 파워뱅크", below_pct: 11.6, posted_at: new Date(Date.now() - 8 * 3600_000).toISOString() },
   { url: "https://quasarzone.com/bbs/qb_saleinfo/views/1", source: "quasarzone", site: "11st", site_label: "11번가", title: "삼성 990 PRO 2TB NVMe SSD", price: 189000, currency: "KRW", shipping: "무료", pct: null, posted_at: new Date(Date.now() - 26 * 3600_000).toISOString() },
   { url: "https://www.fmkorea.com/1", source: "fmkorea", site: "aliexpress", site_label: "알리", title: "샤오미 로봇청소기 S20+ 35% 쿠폰", price: 259000, currency: "KRW", shipping: "무료", pct: 35, posted_at: new Date(Date.now() - 30 * 3600_000).toISOString() },
 ];
@@ -328,9 +328,13 @@ class SupabaseApi implements Api {
     return (data ?? []).map((a) => ({ ...a, id: String(a.id), price: Number(a.price), baseline: a.baseline == null ? null : Number(a.baseline), pct: a.pct == null ? null : Number(a.pct) })) as Alert[];
   }
   async listDeals(days: number) {
-    const { data } = await this.sb.from("deals").select("url,source,site,site_label,title,price,currency,shipping,pct,image_url,category,posted_at,shop_url,list_price")
-      .gte("posted_at", new Date(Date.now() - days * 86400_000).toISOString()).order("posted_at", { ascending: false }).limit(1000);
-    return (data ?? []).map((d) => ({ ...d, price: d.price == null ? null : Number(d.price), pct: d.pct == null ? null : Number(d.pct), list_price: d.list_price == null ? null : Number(d.list_price) })) as Deal[];
+    const base = "url,source,site,site_label,title,price,currency,shipping,pct,image_url,category,posted_at,shop_url,list_price";
+    const since = new Date(Date.now() - days * 86400_000).toISOString();
+    const q = (cols: string) => this.sb.from("deals").select(cols).gte("posted_at", since).order("posted_at", { ascending: false }).limit(1000);
+    let { data, error } = await q(base + ",ref_price,ref_name,ref_url,below_pct");
+    if (error) ({ data } = await q(base));      // 011 마이그레이션 전이면 시세 컬럼 없이
+    const n = (v: unknown) => (v == null ? null : Number(v));
+    return ((data ?? []) as unknown as Record<string, unknown>[]).map((d) => ({ ...d, price: n(d.price), pct: n(d.pct), list_price: n(d.list_price), ref_price: n(d.ref_price), below_pct: n(d.below_pct) })) as unknown as Deal[];
   }
   async markRead(id: string) { await this.sb.from("alerts").update({ read: true }).eq("id", id); }
   async markAllRead() { await this.sb.from("alerts").update({ read: true }).eq("read", false); }

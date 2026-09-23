@@ -396,16 +396,20 @@ def pick_for_digest(deals: list[Deal], keywords: list[str], min_pct: float, limi
         k = matches_keywords(d.title, keywords)
         if k and d.url not in seen:
             out.append((d, f"관심 키워드 '{k}'")); seen.add(d.url)
-    for d in sorted(deals, key=lambda d: -(d.pct or 0)):
-        if d.pct is not None and d.pct >= min_pct and d.url not in seen:
-            out.append((d, f"표시 할인 {d.pct:.0f}%")); seen.add(d.url)
+    for d in sorted(deals, key=lambda d: -(d.effective_pct or 0)):
+        e = d.effective_pct
+        if e is not None and e >= min_pct and d.url not in seen:
+            out.append((d, f"평소보다 {e:.0f}% 쌈" if d.below_pct is not None else f"표시 할인 {e:.0f}%")); seen.add(d.url)
     return out[:limit]
 
 
 def fmt_deal(d: Deal) -> str:
     price = f"{d.price:,.0f}원" if d.price else "가격 미상"
     ship = f" / {d.shipping}" if d.shipping else ""
-    pct = f" ▼{d.pct:.0f}%" if d.pct is not None else ""
+    if d.below_pct is not None and d.ref_price:
+        pct = f" (평소 {d.ref_price:,.0f}원 대비 ▼{d.below_pct:.0f}%)"
+    else:
+        pct = f" ▼{d.pct:.0f}%" if d.pct is not None else ""
     return f"[{d.site_label or d.site}] {d.title} — {price}{ship}{pct}"
 
 
@@ -421,4 +425,10 @@ def run_deals(store, now: Optional[datetime] = None) -> int:
         log.info("딜 보강 %d건 처리, 상점 링크 %d건", done, found)
     except Exception as e:  # noqa: BLE001
         log.warning("딜 보강 중단(수집분은 저장됨): %s", str(e)[:120])
+    try:
+        from .market import price_pending
+        done, matched = price_pending(store)
+        log.info("딜 시세 확인 %d건, 다나와 매칭 %d건", done, matched)
+    except Exception as e:  # noqa: BLE001
+        log.warning("딜 시세 확인 중단: %s", str(e)[:120])
     return n

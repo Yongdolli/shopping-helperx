@@ -67,7 +67,13 @@ export interface Deal {
   image_url?: string | null; category?: string | null; posted_at: string;
   shop_url?: string | null;      // 상점 상품 주소 (있으면 원클릭 추적)
   list_price?: number | null;    // 상점 정가 (있으면 pct 는 정가 대비 계산값)
+  ref_price?: number | null;     // 평소 가격 = 다나와 전체 쇼핑몰 최저가 관측 중앙값 (워커 market.py)
+  ref_name?: string | null; ref_url?: string | null;
+  below_pct?: number | null;     // 평소 대비 % (양수 = 평소보다 쌈)
 }
+
+/** 판단에 쓰는 할인율: 평소 대비가 있으면 그것, 없으면 표시 할인율 (워커 Deal.effective_pct 와 동일) */
+export const effectivePct = (d: Deal) => (d.below_pct ?? d.pct ?? null);
 
 /** 가족 공유 링크 — 태그(또는 전체) 단위 읽기 전용. /s/:token 은 로그인 없이 열린다 */
 export interface ShareLink { token: string; tag: string | null; name: string; created_at: string }
