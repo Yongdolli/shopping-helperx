@@ -118,7 +118,8 @@ node extension/build.mjs                    # content.js 재생성 → chrome://
 ## 환경 변수 (`.env.example` 참고)
 
 - `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` (워커) / `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (웹) — 없으면 각각 SQLite / 데모 모드
-- 웹 공개값 5개는 `web/src/config.public.ts` 에도 있어 Vercel 이 env 없이 빌드해도 동작(import.meta.env 우선). 값 변경 시 .env.local 과 함께 갱신.
+- **저장소는 Public**. 웹 공개값(URL·publishable 키·VAPID 공개키·로그인 이메일)은 `web/src/config.public.ts` 에 코드로 둔다. **비밀번호·서비스 키·VAPID 비밀키는 절대 커밋 금지**.
+  로그인은 기기별 링크 `https://shopping-helperx.vercel.app/#login=<비밀번호>` 를 한 번 열면 세션이 유지되는 방식(App.tsx 가 hash 를 읽고 즉시 지움). 링크는 `python -m worker user <email> <새 비번>` 이 출력.
 - `VITE_LOGIN_EMAIL`, `VITE_LOGIN_PASSWORD` (웹, 개인용 자동 로그인) — 있으면 세션 없을 때 `signInWithPassword` 로 스스로 로그인, 이메일 입력 화면은 실패 시에만. 계정은 `python -m worker user <email> <pw>` (admin API, 이메일 확인 완료).
 - 웹푸시: `VITE_VAPID_PUBLIC_KEY` (웹), `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (워커)
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` / `SMTP_*`, `ALERT_EMAIL_TO`

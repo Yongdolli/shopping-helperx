@@ -22,9 +22,14 @@ export default function App() {
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getSession().then(async ({ data }) => {
-      if (data.session) { setAuthed(true); return; }
-      if (AUTO_LOGIN.email && AUTO_LOGIN.password) {   // 개인용: 세션이 없으면 내장 계정으로 자동 로그인
-        try { await api.signInWithPassword(AUTO_LOGIN.email, AUTO_LOGIN.password); return; }
+      // 기기별 로그인 링크: https://…/#login=<비밀번호> 를 한 번 열면 로그인 후 주소에서 지운다. 세션은 이 기기에 유지된다.
+      const m = location.hash.match(/(?:^#|&)login=([^&]+)/);
+      const linkPw = m ? decodeURIComponent(m[1]) : "";
+      if (m) history.replaceState(null, "", location.pathname + location.search);
+      if (data.session && !linkPw) { setAuthed(true); return; }
+      const pw = linkPw || AUTO_LOGIN.password;           // 로컬 개발은 .env.local 의 VITE_LOGIN_PASSWORD
+      if (AUTO_LOGIN.email && pw) {
+        try { await api.signInWithPassword(AUTO_LOGIN.email, pw); return; }
         catch (e) { setAutoErr((e as Error).message); }
       }
       setAuthed(false);

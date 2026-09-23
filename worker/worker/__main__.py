@@ -88,7 +88,9 @@ def cmd_user(email: str, password: str) -> None:
     else:
         u = admin.create_user({"email": email, "password": password, "email_confirm": True})
         print(f"생성됨: {email} ({u.user.id})")
-    print("웹 자동 로그인: web/.env.local 에 VITE_LOGIN_EMAIL / VITE_LOGIN_PASSWORD 를 같은 값으로 넣으세요 (Vercel 환경 변수에도).")
+    from urllib.parse import quote
+    print("로컬 개발: web/.env.local 의 VITE_LOGIN_PASSWORD 를 같은 값으로.")
+    print("기기별 로그인 링크 (폰·PC 에서 한 번 열기, 남에게 공유 금지):\n  https://shopping-helperx.vercel.app/#login=" + quote(password, safe=""))
 
 
 def cmd_vapid() -> None:
