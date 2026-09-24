@@ -40,11 +40,11 @@ export default function Layout() {
             )}
           </NavLink>
         ))}
-        <div className="mt-auto px-2 text-[11px] text-slate-400">v0.9 · 90일 중앙값 기준</div>
+        <div className="mt-auto px-2 text-[11px] text-slate-400">v1.0 · 평소 가격 = 시세 중앙값</div>
       </aside>
 
       {/* 본문 */}
-      <main className="flex-1 min-w-0 pb-20 md:pb-8">
+      <main className="flex-1 min-w-0 overflow-x-hidden pb-20 md:pb-8">
         <header className="md:hidden sticky top-0 z-10 flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-950/90 backdrop-blur px-4 py-3">
           <img src="/icon.svg" className="h-7 w-7" alt="" />
           <span className="font-bold">Shopping Helper</span>

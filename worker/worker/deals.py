@@ -32,6 +32,7 @@ from .robots import allowed
 log = logging.getLogger(__name__)
 
 KEEP_DAYS = 7
+MIN_REF_RATIO = 0.5          # 딜가 / 상점 정가 — 상점 페이지 '정가'는 다른 옵션·세트 값이 섞여 50%↓ 초과 할인은 믿지 않음
 TIMEOUT = 15
 ENRICH_PER_RUN = 25          # 실행당 게시글·상점 페이지 보강 상한 (매시 크론 → 하루 600건)
 ENRICH_DELAY = 0.7
@@ -350,7 +351,7 @@ def enrich(deal: Deal, get: Callable[[str], str] = None, resolve: Callable[[str]
         deal.price = q.price
     # 근거 가격 = 상점 정가(있으면) 또는 상점 현재 표시가. 딜 가격(쿠폰 적용가)이 그보다 싸면 그만큼이 할인율.
     ref = q.list_price or q.price
-    if ref and deal.price and ref > deal.price:
+    if ref and deal.price and ref > deal.price and deal.price / ref >= MIN_REF_RATIO:   # 65%↓ 초과는 다른 옵션·세트 가격일 가능성이 커 버림
         deal.list_price = ref
         deal.pct = round((ref - deal.price) / ref * 100, 1)
     return deal

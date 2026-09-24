@@ -6,13 +6,18 @@ import type { Country, ProductOverview } from "../types";
 import { COUNTRY_FLAG, SITE_LABEL, fmtPrice } from "../lib/format";
 import { api } from "../lib/api";
 import { toKrw } from "../lib/fx";
+import { DealCard } from "./Deals";
+import { effectivePct, groupDeals } from "../types";
 
 type Filter = "all" | Country | "buy" | "risk" | "paused" | "bought";
 type Sort = "pct" | "landed" | "recent" | "added";
 const SORT_LABEL: Record<Sort, string> = { pct: "할인율", landed: "최종가", recent: "최근 갱신", added: "추가순" };
 
 export default function Dashboard() {
-  const { products, settings, loading, error, rates } = useStore();
+  const { products, settings, loading, error, rates, deals } = useStore();
+  const minDeal = settings?.deal_min_pct ?? 10;
+  const topDeals = useMemo(() => groupDeals(deals).filter((d) => (effectivePct(d) ?? -1) >= minDeal)
+    .sort((a, b) => Number(b.below_pct != null) - Number(a.below_pct != null) || (effectivePct(b) ?? 0) - (effectivePct(a) ?? 0)).slice(0, 4), [deals, minDeal]);
   const [filter, setFilter] = useState<Filter>("all");
   const [site, setSite] = useState<string>("");
   const [tag, setTag] = useState<string>("");
@@ -60,7 +65,7 @@ export default function Dashboard() {
     <div className="space-y-4">
       <div className="flex items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold">추적 상품</h1>
+          <h1 className="text-xl font-bold">오늘의 쇼핑</h1>
           <p className="text-sm text-slate-500">{active.length}개 추적 중 · 지금 사도 되는 것 {buyCount}개{paused.length ? ` · 중단 ${paused.length}` : ""}{bought.length ? ` · 구매 ${bought.length}` : ""}</p>
         </div>
         <div className="hidden md:block"><Link to="/add" className="btn-primary">＋ 상품 추가</Link></div>
@@ -68,6 +73,18 @@ export default function Dashboard() {
 
       {api.mode === "demo" && <Onboarding />}
       <InstallBanner />
+
+      {topDeals.length > 0 && (
+        <section className="space-y-2">
+          <div className="flex items-baseline justify-between">
+            <h2 className="font-semibold">🔥 지금 평소보다 싼 딜</h2>
+            <Link to="/deals" className="text-sm text-sky-600 font-medium">전체 보기 →</Link>
+          </div>
+          <ul className="grid grid-cols-1 gap-2.5 lg:grid-cols-2">{topDeals.map((d) => <DealCard key={d.url} d={d} minPct={minDeal} />)}</ul>
+        </section>
+      )}
+
+      <h2 className="font-semibold pt-1">📦 내가 추적하는 상품</h2>
 
       <div className="grid grid-cols-3 gap-3">
         <Stat label="지금 사도 됨" value={String(buyCount)} accent="text-emerald-600" onClick={() => setFilter("buy")} />
@@ -103,7 +120,7 @@ export default function Dashboard() {
           {filter === "all" && !q && !site && !tag ? <>추적 중인 상품이 없습니다. <Link to="/add" className="text-sky-600 font-semibold">상품 URL을 추가</Link>해 보세요.</> : "해당하는 상품이 없습니다."}
         </div>
       )}
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {list.map((p) => <ProductCard key={p.id} p={p} threshold={threshold} />)}
       </div>
     </div>
@@ -121,7 +138,7 @@ function Stat({ label, value, accent, onClick, small }: { label: string; value: 
 
 function Skeleton() {
   return (
-    <div className="grid gap-3 md:grid-cols-2">
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
       {[0, 1, 2, 3].map((i) => (
         <div key={i} className="card p-4 flex gap-3 animate-pulse">
           <div className="h-16 w-16 rounded-xl bg-slate-200 dark:bg-slate-800" />

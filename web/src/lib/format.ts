@@ -29,6 +29,8 @@ export const SITE_LABEL: Record<string, string> = {
   danawa: "다나와", enuri: "에누리", musinsa: "무신사", oliveyoung: "올리브영", kurly: "컬리", naver: "네이버",
   aliexpress: "알리익스프레스", temu: "테무", shein: "쉬인", taobao: "타오바오", tmall: "티몰", jd: "징동", "1688": "1688",
   amazon: "Amazon", ebay: "eBay", walmart: "Walmart", bestbuy: "Best Buy", target: "Target", etsy: "Etsy", generic: "기타",
+  toss: "토스", kakao: "카카오", ohouse: "오늘의집", steam: "스팀", apple: "애플", samsung: "삼성", lg: "LG", costco: "코스트코",
+  homeplus: "홈플러스", emart: "이마트", wemakeprice: "위메프", tmon: "티몬", unknown: "기타",
 };
 
 const SITE_TABLE: Array<[string, string, Country, string]> = [
