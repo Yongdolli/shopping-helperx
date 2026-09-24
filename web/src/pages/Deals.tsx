@@ -3,9 +3,9 @@ import { Link, useNavigate } from "react-router-dom";
 import { useStore } from "../store";
 import { toast } from "../components/Toast";
 import { SITE_LABEL, fmtPrice, timeAgo } from "../lib/format";
-import { effectivePct, groupDeals, type Deal } from "../types";
+import { DEAL_CATEGORIES, dealCategory, effectivePct, groupDeals, popularity, type Deal, type DealCategory } from "../types";
 
-type Sort = "recent" | "pct";
+type Sort = "recent" | "pct" | "hot";
 type Mode = "cheap" | "all" | "kw";
 type GDeal = Deal & { sources: string[] };
 const SOURCE_LABEL: Record<string, string> = { ppomppu: "뽐뿌", ruliweb: "루리웹", clien: "클리앙", quasarzone: "퀘이사존", fmkorea: "에펨" };
@@ -14,7 +14,7 @@ export const siteName = (d: Deal) => d.site_label || SITE_LABEL[d.site] || (d.si
 /** 딜 탭 — 등록 없이 핫딜 커뮤니티에 올라온 모든 사이트의 할인을 모아, 평소 가격보다 싼 것부터 보여준다. 워커가 매시간 수집. */
 export default function Deals() {
   const { deals: rawDeals, settings, addProduct } = useStore();
-  const deals = useMemo(() => groupDeals(rawDeals), [rawDeals]);   // 여러 커뮤니티의 같은 딜은 하나로
+  const grouped = useMemo(() => groupDeals(rawDeals), [rawDeals]);   // 여러 커뮤니티의 같은 딜은 하나로
   const nav = useNavigate();
   const [busy, setBusy] = useState<string | null>(null);
   const minPct = settings?.deal_min_pct ?? 10;
@@ -23,7 +23,18 @@ export default function Deals() {
   const [site, setSite] = useState("");
   const [mode, setMode] = useState<Mode>("cheap");
   const [sort, setSort] = useState<Sort>("pct");
+  const [cat, setCat] = useState<DealCategory | "">("");
+  const [showEnded, setShowEnded] = useState(false);
+  const [hidden, setHidden] = useState<DealCategory[]>(() => { try { return JSON.parse(localStorage.getItem("sh-hide-cats") || "[]"); } catch { return []; } });
+  const toggleHidden = (c: DealCategory) => {
+    const next = hidden.includes(c) ? hidden.filter((x) => x !== c) : [...hidden, c];
+    setHidden(next); try { localStorage.setItem("sh-hide-cats", JSON.stringify(next)); } catch { /* ignore */ }
+  };
 
+  const endedCount = grouped.filter((d) => d.ended).length;
+  // 끝난 딜·숨긴 분류는 기본으로 빼고 센다 (토글로 끝난 딜 보기)
+  const deals = useMemo(() => grouped.filter((d) => (showEnded || !d.ended) && !hidden.includes(dealCategory(d))), [grouped, showEnded, hidden]);
+  const catCounts = useMemo(() => deals.reduce<Record<string, number>>((a, d) => { const c = dealCategory(d); a[c] = (a[c] ?? 0) + 1; return a; }, {}), [deals]);
   const kwOf = (d: Deal) => keywords.find((k) => d.title.toLowerCase().includes(k)) ?? null;
   const cheap = (d: Deal) => (effectivePct(d) ?? -1) >= minPct;
   const sites = useMemo(() => Object.entries(deals.reduce<Record<string, number>>((a, d) => { const s = siteName(d); a[s] = (a[s] ?? 0) + 1; return a; }, {}))
@@ -34,11 +45,17 @@ export default function Deals() {
     if (mode === "cheap") l = l.filter(cheap);
     if (mode === "kw") l = l.filter((d) => kwOf(d));
     if (site) l = l.filter((d) => siteName(d) === site);
+    if (cat) l = l.filter((d) => dealCategory(d) === cat);
     const t = q.trim().toLowerCase();
     if (t) l = l.filter((d) => d.title.toLowerCase().includes(t) || siteName(d).toLowerCase().includes(t));
     // 많이 싼 순: 평소 가격과 비교해 확인된 딜 먼저, 그다음 게시글·상점 표시 할인율
-    return [...l].sort(sort === "pct" ? (a, b) => Number(b.below_pct != null) - Number(a.below_pct != null) || (effectivePct(b) ?? -999) - (effectivePct(a) ?? -999) || b.posted_at.localeCompare(a.posted_at) : (a, b) => b.posted_at.localeCompare(a.posted_at));
-  }, [deals, mode, site, q, sort, minPct, keywords]);   // eslint-disable-line react-hooks/exhaustive-deps
+    const by: Record<Sort, (a: GDeal, b: GDeal) => number> = {
+      pct: (a, b) => Number(b.below_pct != null) - Number(a.below_pct != null) || (effectivePct(b) ?? -999) - (effectivePct(a) ?? -999) || b.posted_at.localeCompare(a.posted_at),
+      hot: (a, b) => popularity(b) - popularity(a) || b.posted_at.localeCompare(a.posted_at),
+      recent: (a, b) => b.posted_at.localeCompare(a.posted_at),
+    };
+    return [...l].sort(by[sort]);
+  }, [deals, mode, site, cat, q, sort, minPct, keywords]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const cheapCount = deals.filter(cheap).length;
   const checked = deals.filter((d) => d.below_pct != null).length;
@@ -85,19 +102,35 @@ export default function Deals() {
           <input className="input !pl-9" placeholder="상품명 검색 (예: 마우스, 헤드폰)" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         <select className="shrink-0 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 text-sm" value={sort} onChange={(e) => setSort(e.target.value as Sort)} aria-label="정렬">
-          <option value="pct">많이 싼 순</option><option value="recent">최신순</option>
+          <option value="pct">많이 싼 순</option><option value="hot">인기순</option><option value="recent">최신순</option>
         </select>
       </div>
 
-      {sites.length > 1 && (
-        <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-4 px-4 md:mx-0 md:px-0 [scrollbar-width:none]">
-          {sites.map((s) => (
-            <button key={s} onClick={() => setSite(site === s ? "" : s)}
-              className={`shrink-0 rounded-full px-3 py-1 text-xs transition ${site === s ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900" : "bg-white text-slate-600 ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:ring-slate-800"}`}>{s}</button>
+      <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-4 px-4 md:mx-0 md:px-0 [scrollbar-width:none]">
+        {DEAL_CATEGORIES.filter((c) => !hidden.includes(c) && catCounts[c]).map((c) => (
+          <button key={c} onClick={() => setCat(cat === c ? "" : c)}
+            className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition ${cat === c ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900" : "bg-white text-slate-700 ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:ring-slate-800"}`}>
+            {c} <span className="opacity-60 tabular-nums">{catCounts[c]}</span>
+          </button>
+        ))}
+        {sites.length > 1 && (
+          <select value={site} onChange={(e) => setSite(e.target.value)} aria-label="쇼핑몰"
+            className="shrink-0 rounded-full bg-white px-2.5 py-1 text-xs text-slate-600 ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:ring-slate-800">
+            <option value="">모든 쇼핑몰</option>{sites.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        )}
+        {!keywords.length && <Link to="/settings" className="shrink-0 rounded-full px-3 py-1 text-xs text-sky-700 ring-1 ring-sky-200 dark:text-sky-300 dark:ring-sky-900">+ 관심 키워드</Link>}
+      </div>
+      <details className="text-xs text-slate-500">
+        <summary className="cursor-pointer select-none">보기 설정 · 끝난 딜 {endedCount}건 {showEnded ? "보이는 중" : "숨김"}{hidden.length ? ` · 숨긴 분류 ${hidden.length}` : ""}</summary>
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <label className="mr-2 inline-flex items-center gap-1.5"><input type="checkbox" checked={showEnded} onChange={(e) => setShowEnded(e.target.checked)} /> 끝난 딜(종료·품절)도 보기</label>
+          <span>숨길 분류:</span>
+          {DEAL_CATEGORIES.map((c) => (
+            <button key={c} onClick={() => toggleHidden(c)} className={`rounded-full px-2.5 py-0.5 ring-1 ${hidden.includes(c) ? "bg-slate-200 text-slate-500 line-through ring-slate-300 dark:bg-slate-800" : "ring-slate-200 dark:ring-slate-700"}`}>{c}</button>
           ))}
-          {!keywords.length && <Link to="/settings" className="shrink-0 rounded-full px-3 py-1 text-xs text-sky-700 ring-1 ring-sky-200 dark:text-sky-300 dark:ring-sky-900">+ 관심 키워드</Link>}
         </div>
-      )}
+      </details>
 
       {!deals.length && <Empty>아직 수집된 딜이 없어요. 워커가 매시간 핫딜 커뮤니티를 읽어 옵니다.</Empty>}
       {deals.length > 0 && !list.length && (
@@ -125,8 +158,9 @@ export function DealCard({ d, minPct, kw, busy, onTrack }: { d: GDeal; minPct: n
     ? (vsUsual ? "bg-emerald-500 text-white" : "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200")
     : eff > 0 ? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200" : "bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-300";
   const refPrice = vsUsual ? d.ref_price ?? null : d.list_price ?? null;
+  const pop = popularity(d);
   return (
-    <li className={`card p-3 flex gap-3 min-w-0 ${kw ? "ring-2 ring-amber-300/80 dark:ring-amber-700/70" : ""}`}>
+    <li className={`card p-3 flex gap-3 min-w-0 ${kw ? "ring-2 ring-amber-300/80 dark:ring-amber-700/70" : ""} ${d.ended ? "opacity-55" : ""}`}>
       <div className="flex w-16 shrink-0 flex-col items-center gap-1.5">
         <div className={`flex h-14 w-16 flex-col items-center justify-center rounded-xl ${pctCls}`}>
           {eff == null ? <span className="text-[11px] font-medium">가격만</span> : eff > 0 ? (
@@ -141,6 +175,8 @@ export function DealCard({ d, minPct, kw, busy, onTrack }: { d: GDeal; minPct: n
           <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">{siteName(d)}</span>
           <span className="truncate">{d.sources.map((s) => SOURCE_LABEL[s] ?? s).join("·")}{d.sources.length > 1 ? ` ${d.sources.length}곳` : ""} · {timeAgo(d.posted_at)}</span>
           {kw && <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">#{kw}</span>}
+          {d.ended && <span className="shrink-0 rounded bg-slate-200 px-1.5 py-0.5 font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300">종료</span>}
+          {pop >= 30 && !d.ended && <span className="shrink-0 rounded bg-rose-50 px-1.5 py-0.5 text-rose-600 dark:bg-rose-950/60 dark:text-rose-300">인기</span>}
         </div>
         <a href={d.url} target="_blank" rel="noreferrer" className="mt-1 block font-semibold leading-snug hover:text-sky-600 line-clamp-2 [overflow-wrap:anywhere]">{d.title}</a>
         <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
@@ -152,6 +188,7 @@ export function DealCard({ d, minPct, kw, busy, onTrack }: { d: GDeal; minPct: n
           )}
           {vsUsual && d.ref_price != null && d.price != null && d.ref_price <= d.price && <span className="text-xs text-slate-400 tabular-nums">평소 {fmtPrice(d.ref_price, d.currency)}</span>}
           {d.shipping && <span className="text-[11px] text-slate-500">· 배송 {d.shipping}</span>}
+          {(d.recommends || d.comments) ? <span className="text-[11px] text-slate-400 tabular-nums">· 👍{d.recommends ?? 0} 💬{d.comments ?? 0}</span> : null}
         </div>
         <div className="mt-2 flex gap-1.5">
           <a href={d.shop_url ?? d.url} target="_blank" rel="noreferrer" className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200">{d.shop_url ? "상품 보기 ↗" : "글 보기 ↗"}</a>

@@ -60,6 +60,7 @@ PRICE_TAIL_RE = re.compile(r"[(（]\s*([\d,]{2,})\s*원?\s*(?:/\s*([^)）]{0,24}
 PRICE_SLASH_RE = re.compile(r"\s*/\s*([\d,]{2,})\s*원\s*(?:/\s*(\S{1,12}))?\s*$")            # 루리웹 "… / 23,300원"
 PRICE_ANY_RE = re.compile(r"([\d,]{4,})\s*원")
 PCT_RE = re.compile(r"(\d{1,2})\s*%")
+END_RE = re.compile(r"(종료|품절|마감|매진|솔드아웃|sold\s*out)", re.I)   # 제목에 이게 있으면 끝난 딜
 FREE_WORDS = ("무료", "무배", "free", "네멤무배", "멤버십무배")
 
 
@@ -165,25 +166,66 @@ def _make(source: str, url: str, title: str, now: datetime, posted: datetime, pr
         return None
     if url.startswith("http://www.ppomppu.co.kr"):        # http 는 JS 리다이렉트 페이지 → https 로
         url = "https://" + url[len("http://"):]
-    return Deal(url, source, site, p.site_label or "", p.name, p.price, "KRW", p.shipping, p.pct,
-                posted, now, image_url, category)
+    d = Deal(url, source, site, p.site_label or "", p.name, p.price, "KRW", p.shipping, p.pct,
+             posted, now, image_url, category)
+    d.ended = bool(END_RE.search(title))
+    return d
 
 
 # ---------------------------------------------------------------- 소스
 def fetch_ppomppu(now: datetime) -> list[Deal]:
-    items = _rss_items(_get("https://www.ppomppu.co.kr/rss.php?id=ppomppu"))
-    return [d for it in items if (d := _make("ppomppu", it["link"], it["title"], now, _when(it.get("pubDate"), now)))]
+    xml = _get("https://www.ppomppu.co.kr/rss.php?id=ppomppu")
+    out = []
+    for block in re.findall(r"<item>(.*?)</item>", xml, re.S):
+        it = (_rss_items(f"<item>{block}</item>") or [None])[0]
+        if not it:
+            continue
+        d = _make("ppomppu", it["link"], it["title"], now, _when(it.get("pubDate"), now))
+        if not d:
+            continue
+        hits = re.search(r"<hits>\s*\[(\d+)\|(\d+)\|(\d+)\|", block)       # [댓글|조회|추천|…]
+        if hits:
+            d.comments, d.recommends = int(hits.group(1)), int(hits.group(3))
+        out.append(d)
+    return out
+
+
+def ruliweb_stats(page: str) -> dict[str, tuple[int, int, bool]]:
+    """루리웹 목록 페이지: 글 URL → (추천, 댓글, 종료). RSS 에는 이 정보가 없다."""
+    out = {}
+    for row in re.findall(r'<tr class="table_body[^"]*"(.*?)</tr>', page, re.S):
+        a = re.search(r'href="(https://bbs\.ruliweb\.com/market/board/1020/read/\d+)', row)
+        if not a:
+            continue
+        rec = re.search(r'<td class="recomd">\s*(\d+)', row)
+        rep = re.search(r'class="num_reply"[^>]*>\s*\((\d+)\)', row)
+        out[a.group(1)] = (int(rec.group(1)) if rec else 0, int(rep.group(1)) if rep else 0, "[종료]" in row)
+    return out
 
 
 def fetch_ruliweb(now: datetime) -> list[Deal]:
     items = _rss_items(_get("https://bbs.ruliweb.com/market/board/1020/rss"))
+    try:
+        stats = ruliweb_stats(_get("https://bbs.ruliweb.com/market/board/1020"))
+    except Exception as e:  # noqa: BLE001 — 통계는 없어도 딜 수집은 계속
+        log.debug("루리웹 목록 통계 실패: %s", str(e)[:80])
+        stats = {}
     out = []
     for it in items:
         img = re.search(r'src="([^"]+)"', it.get("description", "") or "")
         d = _make("ruliweb", it["link"], it["title"], now, _when(it.get("pubDate"), now), image_url=img.group(1) if img else None,
                   category=it.get("category"))
         if d:
+            s = stats.get(d.url.split("?")[0])
+            if s:
+                d.recommends, d.comments = s[0], s[1]
+                d.ended = d.ended or s[2]
             out.append(d)
+    # RSS 에서 빠진 예전 글의 종료·추천 갱신용 (제목 없이 url·통계만 — run_deals 가 기존 딜에만 반영)
+    rss_urls = {d.url for d in out}
+    for url, (rec, com, ended) in stats.items():
+        if url not in rss_urls:
+            out.append(Deal(url, "ruliweb", "", "", "", None, recommends=rec, comments=com, ended=ended, posted_at=now, fetched_at=now))
     return out
 
 
@@ -205,6 +247,11 @@ def fetch_clien(now: datetime) -> list[Deal]:
                 pass
         d = _make("clien", "https://www.clien.net" + a.group(1), title, now, posted)
         if d:
+            votes = re.search(r'class="list_votes"><i[^>]*></i>\s*(\d+)', body)
+            cmt = re.search(r'data-comment-count=(\d+)', m.group(0))
+            d.recommends = int(votes.group(1)) if votes else 0
+            d.comments = int(cmt.group(1)) if cmt else None
+            d.ended = d.ended or '<span class="icon_info">품절</span>' in body
             out.append(d)
     return out
 
@@ -398,6 +445,7 @@ def same_key(d: Deal) -> str:
 def pick_for_digest(deals: list[Deal], keywords: list[str], min_pct: float, limit: int = 10) -> list[tuple[Deal, str]]:
     """다이제스트에 넣을 딜: 관심 키워드 일치 → 할인율 확인 ≥ min_pct 순. 같은 딜(여러 커뮤니티)은 하나만. (딜, 이유)."""
     uniq: dict[str, Deal] = {}
+    deals = [d for d in deals if not d.ended]                                     # 끝난 딜은 보내지 않음
     for d in sorted(deals, key=lambda d: (d.below_pct is None, d.posted_at)):   # 시세 확인된 것 우선
         uniq.setdefault(same_key(d), d)
     deals = list(uniq.values())
@@ -428,8 +476,13 @@ def fmt_deal(d: Deal) -> str:
 def run_deals(store, now: Optional[datetime] = None) -> int:
     """수집 → 저장(게시글 URL 기준 upsert) → 오래된 것 삭제. 새로 들어간 건수 반환."""
     now = now or datetime.now(timezone.utc)
-    deals, status = fetch_all(now)
+    fetched, status = fetch_all(now)
+    deals = [d for d in fetched if d.title]                      # 제목 없는 것 = 통계 갱신 전용 (루리웹 목록)
     n = store.upsert_deals(deals)
+    try:
+        store.update_deal_stats([d for d in fetched if d.recommends is not None or d.comments is not None or d.ended])
+    except Exception as e:  # noqa: BLE001
+        log.warning("딜 추천·종료 갱신 실패: %s", str(e)[:120])
     store.prune_deals(now - timedelta(days=KEEP_DAYS))
     log.info("딜 수집 %d건(신규 %d) — %s", len(deals), n, ", ".join(f"{k} {v}" for k, v in status.items()))
     try:
@@ -440,7 +493,14 @@ def run_deals(store, now: Optional[datetime] = None) -> int:
     try:
         from .market import price_pending
         done, matched = price_pending(store)
-        log.info("딜 시세 확인 %d건, 다나와 매칭 %d건", done, matched)
+        log.info("딜 시세 확인 %d건, 매칭 %d건", done, matched)
     except Exception as e:  # noqa: BLE001
         log.warning("딜 시세 확인 중단: %s", str(e)[:120])
+    try:
+        from .digest import instant_deal_alerts
+        sent = instant_deal_alerts(store, now)
+        if sent:
+            log.info("큰 딜 즉시 알림 %d건", sent)
+    except Exception as e:  # noqa: BLE001
+        log.warning("큰 딜 즉시 알림 실패: %s", str(e)[:120])
     return n

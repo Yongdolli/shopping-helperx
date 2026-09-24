@@ -2,7 +2,7 @@ name: collect-prices
 
 on:
   schedule:
-    - cron: "17 * * * *"   # 매시 17분 (UTC)
+    - cron: "7,27,47 * * * *"   # 20분마다 (GitHub 무료 크론은 자주 건너뛰므로 촘촘히 → 실제 대략 시간당 1회 이상)
   workflow_dispatch:
 
 jobs:

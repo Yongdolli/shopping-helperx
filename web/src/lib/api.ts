@@ -331,8 +331,9 @@ class SupabaseApi implements Api {
     const base = "url,source,site,site_label,title,price,currency,shipping,pct,image_url,category,posted_at,shop_url,list_price";
     const since = new Date(Date.now() - days * 86400_000).toISOString();
     const q = (cols: string) => this.sb.from("deals").select(cols).gte("posted_at", since).order("posted_at", { ascending: false }).limit(1000);
-    let { data, error } = await q(base + ",ref_price,ref_name,ref_url,below_pct");
-    if (error) ({ data } = await q(base));      // 011 마이그레이션 전이면 시세 컬럼 없이
+    let { data, error } = await q(base + ",ref_price,ref_name,ref_url,below_pct,recommends,comments,ended");
+    if (error) ({ data, error } = await q(base + ",ref_price,ref_name,ref_url,below_pct"));   // 013 전
+    if (error) ({ data } = await q(base));      // 011 전
     const n = (v: unknown) => (v == null ? null : Number(v));
     return ((data ?? []) as unknown as Record<string, unknown>[]).map((d) => ({ ...d, price: n(d.price), pct: n(d.pct), list_price: n(d.list_price), ref_price: n(d.ref_price), below_pct: n(d.below_pct) })) as unknown as Deal[];
   }

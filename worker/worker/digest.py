@@ -8,7 +8,7 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from .deals import fmt_deal, pick_for_digest, same_key
+from .deals import fmt_deal, matches_keywords, pick_for_digest, same_key
 from .models import Alert, Deal, Product
 from .notify import KIND_LABEL, render, send_email, send_push, send_telegram
 from .storage import Storage
@@ -18,7 +18,9 @@ log = logging.getLogger(__name__)
 KST = timezone(timedelta(hours=9))
 KIND_ORDER = ["target", "drop", "low", "restock", "fake", "paused"]
 MAX_PER_KIND = 8
-SLOT_GAP_HOURS = 6.5   # 012 전 대체 창 (08:00→12:30 4.5h, 12:30→19:00 6.5h)
+SLOT_GAP_HOURS = 6.5
+INSTANT_PCT = 20.0      # 관심 키워드 딜이 평소보다 이만큼 싸면 즉시
+INSTANT_ANY_PCT = 40.0  # 키워드와 상관없이 평소보다 이만큼 싸면 즉시   # 012 전 대체 창 (08:00→12:30 4.5h, 12:30→19:00 6.5h)
 
 
 def slot_label(now: Optional[datetime] = None) -> str:
@@ -109,3 +111,51 @@ def run_digest(store: Storage, dry_run: bool = False, now: Optional[datetime] = 
         n += 1
     return n
 
+
+
+def instant_deal_alerts(store: Storage, now: Optional[datetime] = None) -> int:
+    """큰 딜은 다이제스트를 기다리지 않고 바로: 시세로 확인된(평소 대비) 딜 중 끝나지 않은 것이
+    관심 키워드 + 평소보다 INSTANT_PCT% 이상, 또는 키워드 무관 INSTANT_ANY_PCT% 이상이면 발송. 보낸 딜은 deal_sends 에 기록(다이제스트 중복 없음).
+    보낸 기록(012)이 없으면 중복 위험이 있어 보내지 않는다. 발송 건수 반환."""
+    now = now or datetime.now(timezone.utc)
+    recent = [d for d in store.list_deals(now - timedelta(hours=12)) if d.below_pct is not None and not d.ended and d.price]
+    if not recent:
+        return 0
+    users = {p.user_id for p in store.list_products(active_only=False)}
+    total = 0
+    for uid in users:
+        sent_keys = store.sent_deal_keys(uid, now - timedelta(days=3))
+        if sent_keys is None:
+            continue
+        us = store.settings_for(uid)
+        keywords = [k for k in (us.deal_keywords or "").split(",") if k.strip()]
+        picks, seen = [], set()
+        for d in sorted(recent, key=lambda d: -(d.below_pct or 0)):
+            k = same_key(d)
+            if k in sent_keys or k in seen:
+                continue
+            kw = matches_keywords(d.title, keywords)
+            if (kw and d.below_pct >= max(INSTANT_PCT, us.deal_min_pct)) or d.below_pct >= INSTANT_ANY_PCT:
+                picks.append((d, f"관심 키워드 '{kw}'" if kw else "평소보다 크게 쌈")); seen.add(k)
+        if not picks:
+            continue
+        picks = picks[:3]
+        title = f"🔥 평소보다 {picks[0][0].below_pct:.0f}% 싼 딜" + (f" 외 {len(picks) - 1}건" if len(picks) > 1 else "")
+        body = "\n".join(f"• {fmt_deal(d)} · {why}\n   {d.shop_url or d.url}" for d, why in picks)
+        sent: list[str] = []
+        subs = store.push_subscriptions(uid)
+        if us.notify_push and subs:
+            expired = send_push(subs, title, fmt_deal(picks[0][0]), "/deals")
+            for ep in expired:
+                store.remove_push_subscription(ep)
+            if len(expired) < len(subs):
+                sent.append("push")
+        if us.notify_telegram and send_telegram(f"{title}\n{body}", us.telegram_chat_id):
+            sent.append("telegram")
+        if us.notify_email and send_email(title, body, us.email):
+            sent.append("email")
+        if sent:                                    # 채널이 없으면 기록하지 않음 → 다이제스트·앱에서 보게 됨
+            store.mark_deals_sent(uid, [same_key(d) for d, _ in picks])
+            total += len(picks)
+            log.info("즉시 딜 알림 user=%s %d건 발송=%s", uid or "local", len(picks), sent)
+    return total

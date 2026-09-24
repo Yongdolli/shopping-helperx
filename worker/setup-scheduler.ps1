@@ -1,6 +1,6 @@
 # If the PC sleeps mid-run, the frozen run is does not block the next one (Parallel; storage writes are idempotent) and is killed by the time limit.
 # Registers Shopping Helper worker jobs in Windows Task Scheduler (runs while you are logged on; missed runs start when the PC wakes).
-#   collect : every hour at :47 (GitHub Actions runs at :17 -> no simultaneous runs)
+#   collect : every hour at :57 (GitHub Actions runs at :07/:27/:47 -> no simultaneous runs)
 #   digest  : 08:00, 12:30, 19:00   } registered DISABLED unless -WithDigest (GitHub Actions sends them;
 #   report  : Monday 09:00          }  enabling both would send duplicates)
 # Remove all:  Get-ScheduledTask -TaskName 'ShoppingHelper-*' | Unregister-ScheduledTask -Confirm:$false
@@ -16,7 +16,7 @@ function Register-Job($name, $arg, $triggers, [bool]$enabled = $true) {
     Write-Output "registered $name (enabled=$enabled)"
 }
 
-$hourly = New-ScheduledTaskTrigger -Once -At ((Get-Date).Date.AddMinutes(47)) -RepetitionInterval (New-TimeSpan -Hours 1)
+$hourly = New-ScheduledTaskTrigger -Once -At ((Get-Date).Date.AddMinutes(57)) -RepetitionInterval (New-TimeSpan -Hours 1)
 Register-Job 'ShoppingHelper-Collect' 'collect' $hourly
 Register-Job 'ShoppingHelper-Digest' 'digest' @(
     (New-ScheduledTaskTrigger -Daily -At '08:00'),

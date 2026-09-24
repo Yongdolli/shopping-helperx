@@ -8,7 +8,7 @@
 ```
 web/        React + Vite + TS + Tailwind v4 + Zustand PWA (사용자 화면, src/sw.ts 서비스워커 = 웹푸시 수신)
 worker/     Python 수집 워커: 어댑터 → 스냅샷 저장 → 기준선 계산 → 알림 판정 → 발송(푸시·텔레그램·이메일) + 주간 리포트(report.py) + 딜 피드(deals.py)
-supabase/   DB 마이그레이션 SQL (001 초기, 002 옵션·푸시·정가, 003 수동 기록 RLS, 004 정품 리스크, 005 극단값 확인·관세 카테고리, 006 목표가·구매·태그, 007 다이제스트·목표가 즉시, 008 upsert 키 수정, 009 가족 공유, 010 딜 피드, 011 시세·평소 가격, 012 보낸 딜 기록)
+supabase/   DB 마이그레이션 SQL (001 초기, 002 옵션·푸시·정가, 003 수동 기록 RLS, 004 정품 리스크, 005 극단값 확인·관세 카테고리, 006 목표가·구매·태그, 007 다이제스트·목표가 즉시, 008 upsert 키 수정, 009 가족 공유, 010 딜 피드, 011 시세·평소 가격, 012 보낸 딜 기록, 013 딜 추천·댓글·종료)
 extension/  Chrome 확장(MV3) — 북마클릿과 같은 추출 로직을 build.mjs 가 content.js 로 생성. 원클릭 가격 기록
 github-workflows/  GitHub Actions 크론: collect.yml(매시) · daily-digest.yml(08:00·12:30·19:00 KST) · weekly-report.yml(월요일 09:00 KST). push-to-github.cmd 가 .github/workflows/ 로 옮김
 docs/       구상안·설계 문서
@@ -41,7 +41,13 @@ docs/       구상안·설계 문서
   **수량 가드**(개수·용량·무게가 둘 다 있으면 같은 값 필요: 48팩≠24개), 가격비 0.35~1.3, 최고점−0.1 안에서 가장 싼 후보(보수적). 소스별 실패 격리·1회 재시도.
   판단 할인율 = below_pct 우선, 없으면 pct (`Deal.effective_pct` ↔ `types.effectivePct`). 웹 딜 탭 기본 = "평소보다 N%↑ 싼 것", `deal_min_pct` 기본 10.
   실측 매칭률: 다나와만 10% → 3소스 70%(20건 중 14건, 2026-09-24).
-- **스케줄러**: GitHub Actions(저장소 Public → 무료 무제한, 주 스케줄러, 매시 :17; 무료 크론은 가끔 건너뜀) + PC 보조 수집(매시 :47 — 동시 실행 방지) `worker/setup-scheduler.ps1`(작업 스케줄러: 매시 17분 collect, 08:00·12:30·19:00 digest, 월 09:00 report, 로그 worker/data/scheduler.log). PC 쪽 digest·report 는 `-WithDigest` 없이 등록하면 Disabled(중복 발송 방지).
+- **스케줄러**: GitHub Actions(저장소 Public → 무료 무제한, 주 스케줄러, **20분마다 :07/:27/:47** — 무료 크론은 자주 건너뛰므로 촘촘히) + PC 보조 수집(매시 :57 — 동시 실행 방지) `worker/setup-scheduler.ps1`(작업 스케줄러: 매시 17분 collect, 08:00·12:30·19:00 digest, 월 09:00 report, 로그 worker/data/scheduler.log). PC 쪽 digest·report 는 `-WithDigest` 없이 등록하면 Disabled(중복 발송 방지).
+- **끝난 딜·인기** (013 deals.recommends/comments/ended): 매 실행마다 뽐뿌 RSS `<hits>[댓글|조회|추천|…]`, 루리웹 **목록 페이지**(RSS 엔 없음: 추천·댓글·`[종료]`), 클리앙(♥·댓글·`품절`)으로
+  이미 저장된 딜까지 갱신(`update_deal_stats`, 종료는 한 번 되면 유지). 제목의 종료/품절/마감/매진도 종료. 웹은 끝난 딜 기본 숨김(토글), 인기순 = 추천×3+댓글, 30↑ '인기' 배지.
+  다이제스트·즉시 알림은 끝난 딜 제외. **분류**(가전·디지털/식품/생활·뷰티/패션/게임·앱·쿠폰/기타)는 웹 `types.dealCategory` 키워드 추정, 숨길 분류는 기기별 localStorage.
+- **큰 딜 즉시 알림** (`digest.instant_deal_alerts`, collect 마다): 시세 확인된 끝나지 않은 딜 중 관심 키워드 + 평소보다 20%↑(또는 deal_min_pct 중 큰 값), 키워드 무관 40%↑ 이면
+  다이제스트를 기다리지 않고 발송(최대 3건). deal_sends 에 기록해 다이제스트와 중복 없음. 012 가 없거나 알림 채널이 없으면 보내지 않음.
+- 쿠팡 딜 시세는 매시 0~19분(UTC) 실행에서만 호출(20분 주기여도 시간당 3회), 실행당 시세 확인 20건.
 - **가족 공유** (`shares` 테이블, 009): 태그(또는 전체) 단위 읽기 전용 링크 `/s/<token>`. 로그인 없이 열리며 `shared_info/shared_products/shared_snapshots` security definer RPC 로만 읽는다
   (anon 은 테이블 직접 접근 불가, 토큰 12바이트 난수). 웹은 받은 상품·스냅샷으로 `overview/enrich` 를 그대로 돌려 카드를 만든다(임계값 10%, 90일). 구매 완료·비활성 상품 제외. 데모 모드는 같은 브라우저에서만.
 - **가짜 할인** = 사이트 표시 할인율(정가 대비) ≥ 20% 인데 실제(기준선 대비) ≤ 3%. `baseline.is_fake_discount`.

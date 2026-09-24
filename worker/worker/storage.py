@@ -63,6 +63,8 @@ class Storage(Protocol):
     def add_market_price(self, pcode: str, name: str, price: float) -> None: ...
     def sent_deal_keys(self, user_id: Optional[str], since: datetime) -> Optional[set[str]]: ...   # None = 기록 불가(012 전)
     def mark_deals_sent(self, user_id: Optional[str], keys: list[str]) -> None: ...
+    def update_deal_stats(self, deals: list[Deal]) -> None: ...   # 이미 있는 딜의 추천·댓글·종료만 갱신 (종료는 한 번 되면 유지)
+    def count_market_since(self, prefix: str, since: datetime) -> int: ...   # 예: 'coupang:' 최근 1시간 호출 수
 
 
 # ---------------------------------------------------------------- SQLite
@@ -99,7 +101,8 @@ create table if not exists deals (
   url text primary key, source text not null, site text not null, site_label text, title text not null,
   price real, currency text not null default 'KRW', shipping text, pct real, image_url text, category text,
   posted_at text not null, fetched_at text not null, shop_url text, list_price real, enriched integer not null default 0,
-  ref_price real, ref_name text, ref_url text, below_pct real, ref_checked integer not null default 0
+  ref_price real, ref_name text, ref_url text, below_pct real, ref_checked integer not null default 0,
+  recommends integer, comments integer, ended integer not null default 0
 );
 create table if not exists deal_sends (
   user_key text not null, deal_key text not null, sent_at text not null, primary key (user_key, deal_key)
@@ -119,7 +122,8 @@ class SqliteStorage:
         for table, col, ddl in (("user_settings", "digest", "integer default 1"), ("user_settings", "instant_target", "integer default 1"),   # 기존 DB 에 컬럼 추가 (v0.8~)
                                 ("user_settings", "deal_min_pct", "real default 10"), ("user_settings", "deal_keywords", "text"),
                                 ("deals", "ref_price", "real"), ("deals", "ref_name", "text"), ("deals", "ref_url", "text"),
-                                ("deals", "below_pct", "real"), ("deals", "ref_checked", "integer not null default 0")):
+                                ("deals", "below_pct", "real"), ("deals", "ref_checked", "integer not null default 0"),
+                                ("deals", "recommends", "integer"), ("deals", "comments", "integer"), ("deals", "ended", "integer not null default 0")):
             try:
                 self.conn.execute(f"alter table {table} add column {col} {ddl}")
                 if col == "digest":   # v0.8 이전 알림은 이미 보낸 것 — 첫 다이제스트에 쏟아지지 않게
@@ -304,6 +308,15 @@ class SqliteStorage:
         rows = self.conn.execute("select deal_key from deal_sends where user_key=? and sent_at>=?", (user_id or "local", _iso(since)))
         return {r["deal_key"] for r in rows}
 
+    def update_deal_stats(self, deals: list[Deal]) -> None:
+        for d in deals:
+            self.conn.execute("update deals set recommends=coalesce(?,recommends), comments=coalesce(?,comments), ended=max(ended,?) where url=?",
+                              (d.recommends, d.comments, int(d.ended), d.url))
+        self.conn.commit()
+
+    def count_market_since(self, prefix: str, since: datetime) -> int:
+        return self.conn.execute("select count(*) from market_prices where pcode like ? and captured_at>=?", (prefix + "%", _iso(since))).fetchone()[0]
+
     def mark_deals_sent(self, user_id: Optional[str], keys: list[str]) -> None:
         now = _iso(datetime.now(timezone.utc))
         self.conn.executemany("insert or replace into deal_sends(user_key,deal_key,sent_at) values(?,?,?)", [(user_id or "local", k, now) for k in keys])
@@ -314,7 +327,7 @@ class SqliteStorage:
         return Deal(r["url"], r["source"], r["site"], r["site_label"] or "", r["title"], r["price"], r["currency"], r["shipping"],
                     r["pct"], _parse(r["posted_at"]), _parse(r["fetched_at"]), r["image_url"], r["category"],
                     r["shop_url"], r["list_price"], bool(r["enriched"]), r["ref_price"], r["ref_name"], r["ref_url"],
-                    r["below_pct"], bool(r["ref_checked"]))
+                    r["below_pct"], bool(r["ref_checked"]), r["recommends"], r["comments"], bool(r["ended"]))
 
     @staticmethod
     def _row_to_alert(r: sqlite3.Row) -> Alert:
@@ -509,6 +522,28 @@ class SupabaseStorage:
             return None
         return {r["deal_key"] for r in rows}
 
+    def update_deal_stats(self, deals: list[Deal]) -> None:
+        """바뀐 것만 PATCH. 013 전이면 조용히 건너뜀."""
+        by = {d.url: d for d in deals}
+        urls = list(by)
+        for i in range(0, len(urls), 80):
+            try:
+                cur = self.db.table("deals").select("url,recommends,comments,ended").in_("url", urls[i:i + 80]).execute().data
+            except Exception as e:  # noqa: BLE001
+                log.warning("딜 통계 건너뜀 (013_deal_stats.sql 실행 필요): %s", str(e)[:80])
+                return
+            for r in cur:
+                d = by[r["url"]]
+                new = {"recommends": d.recommends if d.recommends is not None else r.get("recommends"),
+                       "comments": d.comments if d.comments is not None else r.get("comments"),
+                       "ended": bool(r.get("ended")) or d.ended}
+                if new != {"recommends": r.get("recommends"), "comments": r.get("comments"), "ended": bool(r.get("ended"))}:
+                    self.db.table("deals").update(new).eq("url", r["url"]).execute()
+
+    def count_market_since(self, prefix: str, since: datetime) -> int:
+        r = self.db.table("market_prices").select("id", count="exact", head=True).like("pcode", prefix + "%").gte("captured_at", _iso(since)).execute()
+        return r.count or 0
+
     def mark_deals_sent(self, user_id: Optional[str], keys: list[str]) -> None:
         if not keys:
             return
@@ -524,7 +559,8 @@ class SupabaseStorage:
         return Deal(r["url"], r["source"], r["site"], r.get("site_label") or "", r["title"], f("price"), r.get("currency") or "KRW",
                     r.get("shipping"), f("pct"), _parse(r["posted_at"]), _parse(r.get("fetched_at")) or _parse(r["posted_at"]),
                     r.get("image_url"), r.get("category"), r.get("shop_url"), f("list_price"), bool(r.get("enriched", False)),
-                    f("ref_price"), r.get("ref_name"), r.get("ref_url"), f("below_pct"), bool(r.get("ref_checked", False)))
+                    f("ref_price"), r.get("ref_name"), r.get("ref_url"), f("below_pct"), bool(r.get("ref_checked", False)),
+                    r.get("recommends"), r.get("comments"), bool(r.get("ended", False)))
 
     @staticmethod
     def _to_alert(r: dict) -> Alert:

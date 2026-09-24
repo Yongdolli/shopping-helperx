@@ -183,6 +183,9 @@ class Deal:
     ref_url: Optional[str] = None
     below_pct: Optional[float] = None   # 평소 대비 % (양수 = 평소보다 쌈)
     ref_checked: bool = False           # 시세 확인 시도 완료
+    recommends: Optional[int] = None    # 커뮤니티 추천 수 (013)
+    comments: Optional[int] = None      # 댓글 수
+    ended: bool = False                 # 종료·품절
 
     @property
     def effective_pct(self) -> Optional[float]:

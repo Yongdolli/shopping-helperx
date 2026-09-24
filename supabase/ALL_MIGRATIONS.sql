@@ -1,4 +1,4 @@
--- Shopping Helper 전체 마이그레이션 (001~012) — 새 프로젝트에 한 번에 붙여넣기용. 개별 파일과 내용 동일.
+-- Shopping Helper 전체 마이그레이션 (001~013) — 새 프로젝트에 한 번에 붙여넣기용. 개별 파일과 내용 동일.
 -- 재실행해도 안전(멱등): 어느 단계에서 실패했든 전체를 다시 Run 하면 된다.
 
 -- ==================== 001_init.sql ====================
@@ -376,3 +376,11 @@ create table if not exists deal_sends (
   primary key (user_key, deal_key)
 );
 alter table deal_sends enable row level security;   -- 정책 없음 = 웹(anon/authenticated) 접근 불가
+
+-- ==================== 013_deal_stats.sql ====================
+-- v1.1: 끝난 딜 숨기기 + 인기 딜. 워커가 매 실행마다 커뮤니티 목록에서 추천·댓글 수와 종료/품절 표시를 갱신한다.
+alter table deals
+  add column if not exists recommends int,                         -- 커뮤니티 추천 수 (뽐뿌 RSS · 루리웹 목록 · 클리앙 ♥)
+  add column if not exists comments   int,                         -- 댓글 수
+  add column if not exists ended      boolean not null default false; -- 종료·품절 (루리웹 [종료], 클리앙 품절, 제목의 종료/품절/마감)
+create index if not exists idx_deals_active on deals(posted_at desc) where not ended;

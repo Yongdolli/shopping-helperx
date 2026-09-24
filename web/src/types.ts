@@ -70,6 +70,9 @@ export interface Deal {
   ref_price?: number | null;     // 평소 가격 = 다나와 전체 쇼핑몰 최저가 관측 중앙값 (워커 market.py)
   ref_name?: string | null; ref_url?: string | null;
   below_pct?: number | null;     // 평소 대비 % (양수 = 평소보다 쌈)
+  recommends?: number | null;    // 커뮤니티 추천 수 (013)
+  comments?: number | null;
+  ended?: boolean;               // 종료·품절
 }
 
 /** 판단에 쓰는 할인율: 평소 대비가 있으면 그것, 없으면 표시 할인율 (워커 Deal.effective_pct 와 동일) */
@@ -84,7 +87,8 @@ export function groupDeals(list: Deal[]): Array<Deal & { sources: string[] }> {
   for (const d of list) { const k = dealKey(d); by.set(k, [...(by.get(k) ?? []), d]); }
   return [...by.values()].map((g) => {
     const rep = [...g].sort((a, b) => Number(a.below_pct == null) - Number(b.below_pct == null) || b.posted_at.localeCompare(a.posted_at))[0];
-    return { ...rep, sources: [...new Set(g.map((x) => x.source))] };
+    return { ...rep, sources: [...new Set(g.map((x) => x.source))], ended: g.some((x) => x.ended),
+      recommends: g.reduce((a, x) => a + (x.recommends ?? 0), 0), comments: g.reduce((a, x) => a + (x.comments ?? 0), 0) };
   });
 }
 
@@ -115,4 +119,23 @@ export interface ProductOverview extends Product {
   landed_rank: [number, number] | null; // 같은 모델 비교 순위
   decision: import("./lib/decision").Decision;
   risk: import("./lib/risk").RiskResult;  // 정품 리스크 (규칙 기반)
+}
+
+/** 인기 점수 = 추천×3 + 댓글 (여러 커뮤니티 합산) */
+export const popularity = (d: Deal) => (d.recommends ?? 0) * 3 + (d.comments ?? 0);
+
+/** 딜 분류 — 제목·커뮤니티 분류로 추정 (웹 전용, 필터용) */
+export const DEAL_CATEGORIES = ["가전·디지털", "식품", "생활·뷰티", "패션", "게임·앱·쿠폰", "기타"] as const;
+export type DealCategory = typeof DEAL_CATEGORIES[number];
+const CAT_WORDS: Array<[DealCategory, RegExp]> = [
+  ["게임·앱·쿠폰", /(스팀|steam|ps5|ps4|닌텐도|스위치|xbox|게임|dlc|앱|app|ios|android|구독|이용권|상품권|기프티콘|쿠폰|포인트|네이버페이|토스|페이백|멤버십|리딤|코드|e북|웹툰)/i],
+  ["가전·디지털", /(노트북|모니터|키보드|마우스|이어폰|헤드폰|헤드셋|스피커|충전기|케이블|ssd|hdd|메모리|ddr|그래픽|cpu|갤럭시|아이폰|아이패드|태블릿|워치|tv|티비|냉장고|세탁기|건조기|청소기|에어컨|선풍기|공기청정|가습기|제습기|전자레인지|밥솥|에어프라이어|카메라|프린터|공유기|usb|hdmi|배터리|보조배터리|로지텍|삼성|lg|애플|샤오미|다이슨)/i],
+  ["식품", /(\d+\s*(g|kg|ml|l)\b|라면|햇반|쌀|우유|두유|커피|음료|생수|콜라|사이다|제로|과자|김|고기|한우|돼지|닭|계란|달걀|과일|사과|배|귤|포도|샤인머스캣|멜론|반찬|김치|치즈|빵|떡|아이스크림|피자|치킨|햄버거|버거|도시락|간식|견과|꿀|올리브오일|소스|국|찌개|만두|냉동)/i],
+  ["생활·뷰티", /(세제|섬유유연제|휴지|물티슈|키친타월|샴푸|린스|바디|치약|칫솔|로션|크림|선크림|화장품|마스크팩|향수|기저귀|생리대|수건|이불|베개|매트리스|의자|책상|수납|조명|캠핑|텀블러|냄비|프라이팬|영양제|비타민|유산균|오메가)/i],
+  ["패션", /(티셔츠|반팔|긴팔|셔츠|바지|청바지|슬랙스|자켓|재킷|패딩|코트|니트|후드|맨투맨|원피스|스커트|양말|속옷|신발|운동화|스니커즈|슬리퍼|샌들|부츠|가방|백팩|지갑|모자|벨트|나이키|아디다스|뉴발란스|푸마|반스)/i],
+];
+export function dealCategory(d: Deal): DealCategory {
+  const text = `${d.title} ${d.category ?? ""} ${d.site_label ?? ""}`;
+  for (const [cat, re] of CAT_WORDS) if (re.test(text)) return cat;
+  return "기타";
 }

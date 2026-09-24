@@ -35,7 +35,7 @@ from .robots import allowed
 
 log = logging.getLogger(__name__)
 
-PRICE_PER_RUN = 15
+PRICE_PER_RUN = 20
 USUAL_DAYS = 90
 MIN_SCORE = 0.5
 RATIO_MIN, RATIO_MAX = 0.35, 1.30
@@ -205,6 +205,10 @@ def parse_coupang(body: str) -> list[Candidate]:
     return out
 
 
+def _now_minute() -> int:
+    return time.gmtime().tm_min
+
+
 def _coupang_search(query: str) -> str:
     from urllib.parse import urlencode
     from .adapters.coupang import DOMAIN, SEARCH_PATH, sign
@@ -269,7 +273,8 @@ SOURCES: list[Source] = [
     Source("enuri", "https://www.enuri.com/search.jsp", parse_enuri, best_match, 2.0, "keyword"),
     Source("auction", "https://browse.auction.co.kr/search", parse_auction, listing_median, 2.0, "keyword"),
     Source("coupang", "https://api-gateway.coupang.com", parse_coupang, best_match, 6.0, fetcher=_coupang_search, budget=3, fallback_only=True,
-           enabled=lambda: bool(settings.coupang_access_key and settings.coupang_secret_key)),
+           # 수집은 20분마다 → 매시 0~19분 실행에서만 쿠팡을 불러 시간당 한 번(3회). 추적 어댑터 5회와 합쳐 시간당 8회
+           enabled=lambda: bool(settings.coupang_access_key and settings.coupang_secret_key) and _now_minute() < 20),
 ]
 
 

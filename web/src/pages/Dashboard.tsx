@@ -16,7 +16,7 @@ const SORT_LABEL: Record<Sort, string> = { pct: "할인율", landed: "최종가"
 export default function Dashboard() {
   const { products, settings, loading, error, rates, deals } = useStore();
   const minDeal = settings?.deal_min_pct ?? 10;
-  const topDeals = useMemo(() => groupDeals(deals).filter((d) => (effectivePct(d) ?? -1) >= minDeal)
+  const topDeals = useMemo(() => groupDeals(deals).filter((d) => !d.ended && (effectivePct(d) ?? -1) >= minDeal)
     .sort((a, b) => Number(b.below_pct != null) - Number(a.below_pct != null) || (effectivePct(b) ?? 0) - (effectivePct(a) ?? 0)).slice(0, 4), [deals, minDeal]);
   const [filter, setFilter] = useState<Filter>("all");
   const [site, setSite] = useState<string>("");
