@@ -23,7 +23,19 @@ export default function Settings() {
 
   if (!s) return null;
   const set = <K extends keyof UserSettings>(k: K, v: UserSettings[K]) => setS({ ...s, [k]: v });
-  const save = async () => { await saveSettings(s); setSaved(true); toast("설정을 저장했습니다"); setTimeout(() => setSaved(false), 1500); };
+  const errMsg = (e: unknown) => (e as { message?: string })?.message || String(e);
+  // 저장 → 서버에서 다시 읽어 확인. 실패하면 이유를 보여준다 (예전엔 조용히 실패했음)
+  const save = async () => {
+    try {
+      await saveSettings(s);
+      const back = await api.getSettings();
+      const ok = JSON.stringify(back.deal_keywords ?? []) === JSON.stringify(s.deal_keywords ?? []) && back.notify_push === s.notify_push;
+      setSaved(true); setTimeout(() => setSaved(false), 2000);
+      toast(ok ? (api.mode === "demo" ? "이 브라우저에만 저장됨 (데모 모드)" : "서버에 저장됨 ✓") : "저장했지만 서버 값이 다릅니다 — 새로고침 후 다시 시도해 주세요");
+    } catch (e) {
+      toast("저장 실패: " + errMsg(e) + " — 로그인 링크로 다시 들어와 주세요");
+    }
+  };
 
   const togglePush = async () => {
     setPushBusy(true);
@@ -32,13 +44,22 @@ export default function Settings() {
       else {
         const r = await enablePush();
         setPushState(r === "subscribed" ? "on" : r === "local-only" ? "local" : r === "denied" ? "denied" : "unsupported");
+        toast(r === "subscribed" ? "웹푸시 연결됨 ✓ — 테스트 알림이 떴는지 확인하세요" : r === "denied" ? "알림 권한이 거부됨 — 브라우저 사이트 설정에서 허용하세요"
+          : r === "unsupported" ? "이 브라우저는 웹푸시를 지원하지 않습니다 (아이폰은 홈 화면에 추가한 앱에서만)" : "권한만 받음 (서버 푸시 키 없음)");
       }
+    } catch (e) {
+      toast("웹푸시 연결 실패: " + errMsg(e));
     } finally { setPushBusy(false); }
   };
 
   return (
     <div className="max-w-xl space-y-4">
       <h1 className="text-xl font-bold">설정</h1>
+      <div className={`rounded-xl px-3 py-2 text-xs ${api.mode === "demo" ? "bg-amber-50 text-amber-900 dark:bg-amber-900/30 dark:text-amber-100" : "bg-emerald-50 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-100"}`}>
+        {api.mode === "demo"
+          ? <>⚠ <b>데모 모드</b> — 설정이 이 브라우저에만 저장되고 서버·알림에는 반영되지 않습니다. 새로고침(Ctrl+F5)해도 계속 보이면 알려주세요.</>
+          : <>✓ 서버 연결됨 · <b>{userEmail ?? "로그인 확인 중"}</b> — 저장하면 알림에 바로 반영됩니다.</>}
+      </div>
 
       <section className="card p-4 md:p-6 space-y-4">
         <h2 className="font-semibold">알림 기준</h2>
