@@ -8,7 +8,7 @@ import { parseCsv, toCsv } from "../lib/csv";
 import { toast } from "../components/Toast";
 
 export default function Settings() {
-  const { settings, saveSettings, userEmail, refresh } = useStore();
+  const { settings, saveSettings, userEmail } = useStore();
   const [s, setS] = useState<UserSettings | null>(settings);
   const [saved, setSaved] = useState(false);
   const [pushState, setPushState] = useState<"off" | "local" | "on" | "denied" | "unsupported">("off");
@@ -57,7 +57,7 @@ export default function Settings() {
       <h1 className="text-xl font-bold">설정</h1>
       <div className={`rounded-xl px-3 py-2 text-xs ${api.mode === "demo" ? "bg-amber-50 text-amber-900 dark:bg-amber-900/30 dark:text-amber-100" : "bg-emerald-50 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-100"}`}>
         {api.mode === "demo"
-          ? <>⚠ <b>데모 모드</b> — 설정이 이 브라우저에만 저장되고 서버·알림에는 반영되지 않습니다. 새로고침(Ctrl+F5)해도 계속 보이면 알려주세요.</>
+          ? <>이 브라우저에만 저장됩니다 — 서버·푸시 알림과는 연결되어 있지 않습니다.</>
           : <>✓ 서버 연결됨 · <b>{userEmail ?? "로그인 확인 중"}</b> — 저장하면 알림에 바로 반영됩니다.</>}
       </div>
 
@@ -131,15 +131,8 @@ export default function Settings() {
       <CsvSection />
 
       <section className="card p-4 md:p-6 space-y-2 text-sm">
-        <h2 className="font-semibold">계정</h2>
-        {api.mode === "demo" ? (
-          <p className="text-slate-500">데모 모드입니다. 데이터는 이 브라우저에만 저장됩니다. <code>web/.env.local</code> 에 Supabase 키를 넣으면 계정·동기화·워커 연동이 켜집니다.</p>
-        ) : (
-          <div className="flex items-center justify-between">
-            <span>{userEmail}</span>
-            <button className="btn-ghost" onClick={async () => { await api.signOut(); await refresh(); }}>로그아웃</button>
-          </div>
-        )}
+        <h2 className="font-semibold">저장 위치</h2>
+        <p className="text-slate-500">로그인 없이 쓰는 앱입니다. 데이터는 이 브라우저에만 저장되며 기기 간 동기화는 되지 않습니다.</p>
       </section>
     </div>
   );
