@@ -2,7 +2,7 @@
  * 데이터 접근은 이 파일만 통한다.
  * VITE_SUPABASE_URL 이 있으면 Supabase, 없으면 브라우저 로컬 데모 저장소.
  */
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Alert, Deal, Product, ProductOverview, PushSubscriptionJson, ShareLink, Snapshot, UserSettings } from "../types";
 import { claimedPct, detectSite, isFakeDiscount, median, parseVariant } from "./format";
 import { assessRisk, countSellerChanges, guessModelNo } from "./risk";
@@ -231,7 +231,7 @@ class DemoApi implements Api {
 }
 
 // ------------------------------------------------------------------ Supabase
-class SupabaseApi implements Api {
+export class SupabaseApi implements Api {
   readonly mode = "supabase" as const;
   constructor(private sb: SupabaseClient) {}
 
@@ -386,10 +386,6 @@ class SupabaseApi implements Api {
   async signOut() { await this.sb.auth.signOut(); }
 }
 
-const url = cfg("VITE_SUPABASE_URL");
-const key = cfg("VITE_SUPABASE_ANON_KEY");
-export const supabase = url && key ? createClient(url, key) : null;
-export const api: Api = supabase ? new SupabaseApi(supabase) : new DemoApi();
+/** 로그인·서버 연결 없음 — 데이터는 이 브라우저(localStorage)에만 저장된다. SupabaseApi 는 다시 연결할 때를 위해 남겨 둔 미사용 코드. */
+export const api: Api = new DemoApi();
 export const VAPID_PUBLIC_KEY = cfg("VITE_VAPID_PUBLIC_KEY");
-/** 개인용 자동 로그인 — `python -m worker user <email> <pw>` 로 만든 계정. 둘 다 있으면 앱이 열릴 때 스스로 로그인한다 (입력 화면 없음). */
-export const AUTO_LOGIN = { email: cfg("VITE_LOGIN_EMAIL"), password: cfg("VITE_LOGIN_PASSWORD") };
